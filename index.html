@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Exam Seating Generator</title>
+</head>
+<body>
+
+  <h2>Upload CSV Files</h2>
+
+  <form id="uploadForm">
+    <label>Student CSV:</label><br/>
+    <input type="file" name="students" accept=".csv" required /><br/><br/>
+
+    <label>Hall CSV:</label><br/>
+    <input type="file" name="halls" accept=".csv" required /><br/><br/>
+
+    <button type="submit">Generate PDFs</button>
+  </form>
+
+  <script>
+    document.getElementById("uploadForm").onsubmit = async (e) => {
+      e.preventDefault();
+
+      const formData = new FormData(e.target);
+
+      const response = await fetch("http://localhost:5000/generate", {
+        method: "POST",
+        body: formData
+      });
+
+      if (!response.ok) {
+        alert("Failed to generate PDFs");
+        return;
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "Exam_PDFs.zip";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      window.URL.revokeObjectURL(url);
+    };
+  </script>
+
+</body>
+</html>
