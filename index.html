@@ -9,12 +9,15 @@
   <h2>Upload CSV Files</h2>
 
   <form id="uploadForm">
-    <label>Student CSV:</label><br/>
-    <input type="file" name="students" accept=".csv" required /><br/><br/>
+    <label>4th Student CSV:</label><br/>
+    <input type="file" name="students4" accept=".csv" required /><br/><br/>
+
+    <label>3rd Student CSV:</label><br/>
+    <input type="file" name="students3" accept=".csv" required /><br/><br/>
 
     <label>Hall CSV:</label><br/>
     <input type="file" name="halls" accept=".csv" required /><br/><br/>
-
+  
     <button type="submit">Generate PDFs</button>
   </form>
 
@@ -23,8 +26,9 @@
       e.preventDefault();
 
       const formData = new FormData(e.target);
+      formData.append('isElective','true')
 
-      const response = await fetch("http://localhost:5000/generate", {
+      const response = await fetch("http://localhost:5000/twoGenerate", {
         method: "POST",
         body: formData
       });
