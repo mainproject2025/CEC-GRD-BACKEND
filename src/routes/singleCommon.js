@@ -1,32 +1,23 @@
 const path = require("path");
 const multer = require("multer");
 const fs = require("fs");
-const PDFDocument = require("pdfkit");
-const archiver = require("archiver");
 const express = require("express");
 
 const router = express.Router();
 const upload = multer({ dest: "uploads/" });
+
+// Initialize Firebase Admin (make sure to set up your service account)
+// admin.initializeApp({
+//   credential: admin.credential.applicationDefault()
+// });
+
+const { admin, db } = require("../config/firebase");
 
 /* ================================
    CONFIG
 ================================ */
 const QUALITY_THRESHOLD = 85;
 const MAX_RETRIES = 10;
-
-const SUBJECT_COLORS = [
-  "red",
-  "blue",
-  "green",
-  "purple",
-  "orange",
-  "brown",
-  "darkgreen",
-  "darkblue",
-  "magenta",
-  "teal",
-  "maroon",
-];
 
 /* ================================
    CSV → JSON
@@ -65,12 +56,12 @@ function groupStudents(students, isElective) {
       if (!map[s.Subject]) {
         map[s.Subject] = { rolls: [] };
       }
-      map[s.Subject].rolls.push(s["Roll Number"]);
+      map[s.Subject].rolls.push(s["RollNumber"]);
     });
   } else {
     students.forEach((s) => {
       if (!map[s.Branch]) map[s.Branch] = [];
-      map[s.Branch].push(s["Roll Number"]);
+      map[s.Branch].push(s["RollNumber"]);
     });
   }
 
@@ -82,27 +73,36 @@ function groupStudents(students, isElective) {
 ================================ */
 function buildRollToBranch(students) {
   const map = {};
-  students.forEach((s) => (map[s["Roll Number"]] = s.Branch));
+  students.forEach((s) => (map[s["RollNumber"]] = s.Branch));
   return map;
 }
 
 function buildRollToSubject(students) {
   const map = {};
-  students.forEach((s) => (map[s["Roll Number"]] = s.Subject));
+  students.forEach((s) => (map[s["RollNumber"]] = s.Subject));
   return map;
 }
 
-function buildSubjectColorMap(students) {
+function buildRollToStudentInfo(students) {
   const map = {};
-  let idx = 0;
-
+   
+  
   students.forEach((s) => {
-    if (!map[s.Subject]) {
-      map[s.Subject] = SUBJECT_COLORS[idx % SUBJECT_COLORS.length];
-      idx++;
-    }
+   
+  
+    
+    
+    map[s["RollNumber"]] = {
+      name: s.StudentName || "",
+      branch: s.Branch || "",
+      subject: s.Subject || "",
+      batch: s.Batch || "",
+      year: s.Year || ""
+    };
   });
-
+   
+ 
+  
   return map;
 }
 
@@ -217,7 +217,6 @@ function electiveOptimization(arr, rollToSubject) {
         const sa = rollToSubject[a];
         const sb = rollToSubject[b];
 
-        // ❌ Violation: A A
         if (sa === sb) {
           outer:
           for (let i = r + 1; i < R; i++) {
@@ -227,7 +226,6 @@ function electiveOptimization(arr, rollToSubject) {
 
               const sx = rollToSubject[x];
 
-              // ensure A B A pattern safety
               const leftOK =
                 c === 0 || rollToSubject[arr[r][c - 1]] !== sx;
               const rightOK =
@@ -249,7 +247,6 @@ function electiveOptimization(arr, rollToSubject) {
 
   return arr;
 }
-
 
 /* ================================
    OPTIMIZED SEATING
@@ -293,64 +290,69 @@ function optimizedSeating(
 }
 
 /* ================================
-   PDF EXPORT (COLOR CODED)
+   CONVERT SEATING TO FIRESTORE FORMAT
 ================================ */
-function exportHallSeatingPDF(
-  hall,
-  seats,
-  filePath,
-  rollToSubject,
-  subjectColorMap
-) {
-  const doc = new PDFDocument({ margin: 40, size: "A4" });
-  doc.pipe(fs.createWriteStream(filePath));
+function convertSeatingToFirestoreFormat(hall, seats, rollToStudentInfo) {
+  const allocation = [];
+  let seatNumber = 1;
 
-  doc.fontSize(16).fillColor("black")
-    .text("Hall Seating Arrangement", { align: "center" });
-  doc.moveDown(0.5);
-  doc.fontSize(12)
-    .text(`Hall: ${hall.RoomName}`, { align: "center" });
-  doc.moveDown(1);
-
-  const cols = seats[0].length;
-  const pageWidth =
-    doc.page.width - doc.page.margins.left - doc.page.margins.right;
-
-  const cellW = pageWidth / cols;
-  const cellH = 25;
-
-  let y = doc.y;
-  doc.fontSize(9);
-
-  seats.forEach((row) => {
-    let x = doc.page.margins.left;
-
-    row.forEach((roll) => {
-      doc.rect(x, y, cellW, cellH).stroke();
-
+    
+   
+  // console.log(rollToStudentInfo);
+  
+  seats.forEach((row, rowIndex) => {
+    row.forEach((roll, colIndex) => {
+       
+       
+      
       if (roll) {
-        const subject = rollToSubject[roll];
-        const color = subjectColorMap[subject] || "black";
-
-        doc.fillColor(color).text(roll, x + 2, y + 7, {
-          width: cellW - 4,
-          align: "center",
+ 
+        const studentInfo = rollToStudentInfo[roll] || {};
+        
+        allocation.push({
+          roll: roll,
+          name: studentInfo.name,
+          batch: studentInfo.batch,
+          year: studentInfo.year,
+          hall: hall.HallName,
+          row: rowIndex + 1,
+          bench: colIndex + 1,
+          seat: seatNumber
         });
-        doc.fillColor("black");
-      } else {
-        doc.text("-", x + 2, y + 7, {
-          width: cellW - 4,
-          align: "center",
-        });
+        seatNumber++;
       }
-
-      x += cellW;
     });
+  });
+   
 
-    y += cellH;
+  
+  
+  return allocation;
+}
+
+/* ================================
+   SAVE TO FIRESTORE
+================================ */
+async function saveAllocationToFirestore(hallAllocations, metadata,name,sem) {
+  const docRef = db.collection("examAllocations").doc();
+  
+  const firestoreData = {
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    halls: {},
+    meta: metadata,
+    name:name,
+    sems:sem
+  };
+
+  hallAllocations.forEach(({ hallName, allocation }) => {
+     
+    
+    firestoreData.halls[hallName] = allocation;
   });
 
-  doc.end();
+  await docRef.set(firestoreData);
+  
+  return docRef.id;
 }
 
 /* ================================
@@ -371,22 +373,27 @@ router.post(
         excelToCsv(fs.readFileSync(req.files.halls[0].path, "utf8"))
       );
 
+       
+      
       const isElective = req.body.isElective;
 
-      const outputDir = path.join(__dirname, "output");
-      if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir);
-
       const groups = groupStudents(students, isElective);
+
+     
+      
       const order = Object.keys(groups);
 
       let pointers = {};
       order.forEach((k) => (pointers[k] = 0));
-
+      
+      
       const rollToBranch = buildRollToBranch(students);
       const rollToSubject = buildRollToSubject(students);
-      const subjectColorMap = buildSubjectColorMap(students);
+      const rollToStudentInfo = buildRollToStudentInfo(students);
 
-      const files = [];
+      // console.log(rollToStudentInfo);
+      
+      const hallAllocations = [];
 
       halls.forEach((hall) => {
         const [seats, newPointers] = optimizedSeating(
@@ -401,30 +408,54 @@ router.post(
 
         pointers = newPointers;
 
-        const fp = `${outputDir}/Seating_${hall.RoomName}.pdf`;
-        exportHallSeatingPDF(
+        // console.log(hall);
+        // console.log(seats);
+        // console.log(rollToStudentInfo);
+
+         
+        const allocation = convertSeatingToFirestoreFormat(
           hall,
           seats,
-          fp,
-          rollToSubject,
-          subjectColorMap
+          rollToStudentInfo
         );
-        files.push(fp);
+        
+         
+         
+        
+        hallAllocations.push({
+          hallName: hall.HallName,
+          allocation: allocation
+        });
       });
 
-      res.setHeader("Content-Type", "application/zip");
-      res.setHeader(
-        "Content-Disposition",
-        "attachment; filename=Exam_PDFs.zip"
-      );
+      // Prepare metadata
+      const metadata = {
+        totalStudents: students.length,
+        totalHalls: halls.length,
+        isElective: isElective === "true",
+        studentsPerBench: hallAllocations[0]?.allocation.length > 0 
+          ? Math.max(...hallAllocations[0].allocation.map(s => s.bench))
+          : 0
+      };
 
-      const archive = archiver("zip", { zlib: { level: 9 } });
-      archive.pipe(res);
-      files.forEach((f) => archive.file(f, { name: path.basename(f) }));
-      await archive.finalize();
+      // Save to Firestore
+      const docId = await saveAllocationToFirestore(hallAllocations, metadata,req.body.examName,req.body.years);
+
+      res.json({
+        success: true,
+        message: "Allocation saved successfully",
+        documentId: docId,
+        totalStudents: students.length,
+        totalHalls: halls.length
+      });
+
+      // Clean up uploaded files
+      fs.unlinkSync(req.files.students[0].path);
+      fs.unlinkSync(req.files.halls[0].path);
+
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: "PDF generation failed" });
+      res.status(500).json({ error: "Allocation generation failed", details: err.message });
     }
   }
 );

@@ -4,14 +4,27 @@ const cors = require("cors");
 
 const app = express();
 app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-const singleExam= require('./routes/singleExam.route')
-const twoExam=require('./routes/TwoCommon.route')
-app.use('/singleGenerate',singleExam)
-app.use('/TwoGenerate',twoExam)
+const singleExamCommon= require('./routes/singleCommon')
+const singleExamElective= require('./routes/singleExam.route')
+const twoExamCommon=require('./routes/TwoCommon.route')
+const twoExamElective=require('./routes/TwoElective.route')
+const auth=require('./routes/auth.route')
+const FetchExamDetails=require('./routes/utils/examDetailsFetch.route')
+const pdfMakerCommon=require('./routes/pdf.route')
+
+app.use('/singleGenerateCommon',singleExamCommon)
+app.use('/singleGenerateElective',singleExamElective)
+app.use('/TwoGenerateCommon',twoExamCommon)
+app.use('/TwoGenerateElective',twoExamElective)
+app.use('/auth',auth)
+app.use('/FetchExamDetails',FetchExamDetails)
+app.use('/MakePdfCommon',pdfMakerCommon)
 /* ================================
    START SERVER
 ================================ */
-app.listen(5000, () => {
+app.listen(5001, () => {
   console.log("Server running...");
 });

@@ -15,8 +15,12 @@
     "csv-parser": "^3.2.0",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
+    "firebase-admin": "^13.6.0",
+    "fs-extra": "^11.3.3",
     "multer": "^2.0.2",
-    "pdfkit": "^0.17.2"
+    "papaparse": "^5.5.3",
+    "pdfkit": "^0.17.2",
+    "puppeteer": "^24.34.0"
   },
   "devDependencies": {
     "eslint": "^8.34.0",
