@@ -20,6 +20,7 @@ router.get("/", async (req, res) => {
         examId: doc.id,
         examName: data.name || "Unnamed Exam",
         sems: data.sems || [],
+        isElective:data.isElective,
         createdAt:'1/1/2026'
       };
     });

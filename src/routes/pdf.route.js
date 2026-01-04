@@ -2,11 +2,12 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const puppeteer = require("puppeteer");
-
+const archiver = require("archiver");
 
 const router = express.Router();
 const { admin, db } = require("../config/firebase");
-
+const { log } = require("util");
+const { all } = require("./pdf.route");
 
 /* =========================================================
    🔁 RECONSTRUCT allocation MATRIX from Firestore
@@ -14,30 +15,52 @@ const { admin, db } = require("../config/firebase");
 function reconstructAllocation(hallsData) {
   const allocation = {};
 
-  for (const [hallName, students] of Object.entries(hallsData)) {
-    let maxRow = 0;
-    let maxBench = 0;
+  for (const [hallName, hallData] of Object.entries(hallsData)) {
+    const R = hallData.rows;
+    const C = hallData.columns;
 
-    students.forEach(s => {
-      maxRow = Math.max(maxRow, s.row);
-      maxBench = Math.max(maxBench, s.bench);
-    });
+    if (!R || !C) {
+      console.warn(`⚠️ Invalid hall dimensions for ${hallName}`);
+      continue;
+    }
 
-    const rows = Array.from({ length: maxRow }, () =>
-      Array.from({ length: maxBench }, () => [])
+    // Create empty matrix [row][bench][students]
+    const matrix = Array.from({ length: R }, () =>
+      Array.from({ length: C }, () => [])
     );
 
-    students.forEach(s => {
-      rows[s.row - 1][s.bench - 1][s.seat - 1] = {
-        Name: s.name,
-        RollNumber: s.roll,
-        year: s.year,
-        Batch: s.batch,
-      };
-    });
+    for (const [key, value] of Object.entries(hallData)) {
+      // ✅ Only process row0, row1, row2...
+      if (!/^row\d+$/.test(key)) continue;
 
-    allocation[hallName] = rows;
+      // ✅ Must be an array
+      if (!Array.isArray(value)) {
+        console.warn(`⚠️ ${hallName}.${key} is not an array`);
+        continue;
+      }
+
+      const rowIndex = Number(key.replace("row", ""));
+
+      value.forEach((s) => {
+        if (!s || typeof s !== "object") return;
+
+        const benchIndex = s.bench - 1;
+
+        if (matrix[rowIndex] && matrix[rowIndex][benchIndex]) {
+          matrix[rowIndex][benchIndex].push({
+            Name: s.name,
+            RollNumber: s.roll,
+            year: s.year,
+            Batch: s.batch,
+          });
+        }
+      });
+    }
+
+    allocation[hallName] = matrix;
   }
+
+  console.log("✅ Allocation reconstructed successfully");
 
   return allocation;
 }
@@ -70,15 +93,13 @@ async function generateHallSeatingPDF(allocation, outputDir) {
     );
 
     const grouped = {};
-    students.forEach(s => {
+    students.forEach((s) => {
       grouped[s.year] ??= [];
       grouped[s.year].push(s);
     });
 
-    Object.values(grouped).forEach(arr =>
-      arr.sort((a, b) =>
-        a.row === b.row ? a.col - b.col : a.row - b.row
-      )
+    Object.values(grouped).forEach((arr) =>
+      arr.sort((a, b) => (a.row === b.row ? a.col - b.col : a.row - b.row))
     );
 
     let html = `
@@ -96,8 +117,10 @@ async function generateHallSeatingPDF(allocation, outputDir) {
       <h2>Hall: ${hallName}</h2>
     `;
 
-    Object.keys(grouped).sort().forEach(year => {
-      html += `
+    Object.keys(grouped)
+      .sort()
+      .forEach((year) => {
+        html += `
         <h3>Year: ${year}</h3>
         <table>
           <tr>
@@ -105,33 +128,35 @@ async function generateHallSeatingPDF(allocation, outputDir) {
             <th>Name</th>
             <th>Roll</th>
             <th>Row</th>
-            <th>Col</th>
+            
           </tr>
       `;
-      grouped[year].forEach((s, i) => {
-        html += `
+        grouped[year].forEach((s, i) => {
+          html += `
           <tr>
             <td>${i + 1}</td>
             <td>${s.name}</td>
             <td>${s.roll}</td>
             <td>${s.row}</td>
-            <td>${s.col}</td>
+             
           </tr>
         `;
+        });
+        html += "</table>";
       });
-      html += "</table>";
-    });
 
     html += `<div class="page-break"></div><h2>Grid</h2><table class="grid">`;
-
-    rows.forEach(row => {
+    const maxSeatsPerBench = Math.max(
+      ...rows.flatMap((row) => row.map((bench) => bench.length))
+    );
+    rows.forEach((row) => {
       html += "<tr>";
-      row.forEach(bench =>
-        [...Array(3)].forEach((_, i) => {
+      row.forEach((bench) => {
+        for (let i = 0; i < maxSeatsPerBench; i++) {
           const s = bench[i];
-          html += `<td>${s ? s.RollNumber : "—"}</td>`;
-        })
-      );
+          html += `<td>${s ? s.RollNumber : ""}</td>`;
+        }
+      });
       html += "</tr>";
     });
 
@@ -168,9 +193,9 @@ async function generateHallYearBatchRangePDF(allocation, outputDir) {
   for (const [hall, rows] of Object.entries(allocation)) {
     const map = {};
 
-    rows.forEach(row =>
-      row.forEach(bench =>
-        bench.forEach(s => {
+    rows.forEach((row) =>
+      row.forEach((bench) =>
+        bench.forEach((s) => {
           if (!s) return;
           map[s.year] ??= {};
           map[s.year][s.Batch ?? "UNKNOWN"] ??= [];
@@ -214,56 +239,63 @@ async function generateHallYearBatchRangePDF(allocation, outputDir) {
 ========================================================= */
 router.post("/", async (req, res) => {
   try {
-  const { examId } = req.body;
+    const { examId } = req.body;
 
-  const snap = await db.collection("examAllocations").doc(examId).get();
-  if (!snap.exists) {
-    return res.status(404).json({ error: "Not found" });
-  }
+    const snap = await db.collection("examAllocations").doc(examId).get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Not found" });
+    }
 
-  const data = snap.data();
-  const allocation = reconstructAllocation(data.halls);
+    const data = snap.data();
+    const allocation = reconstructAllocation(data.halls);
 
-  const outputDir = path.join(__dirname, "..", "output", examId);
+    const outputDir = path.join(__dirname, "..", "output");
 
-  // Ensure output directory exists
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
+    // Ensure output directory exists
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
 
-  // Generate PDFs
-  await generateHallSeatingPDF(allocation, outputDir);
-  await generateHallYearBatchRangePDF(allocation, outputDir);
+    // Generate PDFs
+    await generateHallSeatingPDF(allocation, outputDir);
+    await generateHallYearBatchRangePDF(allocation, outputDir);
 
-  /* ===============================
+    /* ===============================
      ZIP + STREAM RESPONSE
   =============================== */
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="Exam_${examId}_PDFs.zip"`
+    );
+    res.setHeader("Content-Type", "application/zip");
 
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename=Exam_${examId}_PDFs.zip`
-  );
-  res.setHeader("Content-Type", "application/zip");
+    const archive = archiver("zip", { zlib: { level: 9 } });
 
-  const archive = archiver("zip", { zlib: { level: 9 } });
+    archive.on("error", (err) => {
+      console.error("Archive error:", err);
+      if (!res.headersSent) res.status(500).end();
+    });
 
-  archive.on("error", (err) => {
-    throw err;
-  });
+    // Handle client cancel
+    res.on("close", () => {
+      if (!archive.finalized) archive.abort();
+    });
 
-  // Pipe ZIP directly to response
-  archive.pipe(res);
+    // Stream ZIP
+    archive.pipe(res);
 
-  // Add the entire output directory to zip
-  archive.directory(outputDir, false);
+    // Add files
+    archive.directory(outputDir, false);
 
-  // Finalize ZIP
-  await archive.finalize();
+    // Start streaming
+    await archive.finalize();
 
-} catch (err) {
-  console.error(err);
-  res.status(500).json({ error: err.message });
-}
+    // ✅ VERY IMPORTANT
+    return; // stop execution here
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;

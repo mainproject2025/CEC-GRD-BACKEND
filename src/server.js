@@ -14,7 +14,9 @@ const twoExamElective=require('./routes/TwoElective.route')
 const auth=require('./routes/auth.route')
 const FetchExamDetails=require('./routes/utils/examDetailsFetch.route')
 const pdfMakerCommon=require('./routes/pdf.route')
+const pdfMakerElective=require('./routes/pdfElective.route')
 
+app.use('/GeneratePdfElective',pdfMakerElective)
 app.use('/singleGenerateCommon',singleExamCommon)
 app.use('/singleGenerateElective',singleExamElective)
 app.use('/TwoGenerateCommon',twoExamCommon)
@@ -22,6 +24,7 @@ app.use('/TwoGenerateElective',twoExamElective)
 app.use('/auth',auth)
 app.use('/FetchExamDetails',FetchExamDetails)
 app.use('/MakePdfCommon',pdfMakerCommon)
+
 /* ================================
    START SERVER
 ================================ */

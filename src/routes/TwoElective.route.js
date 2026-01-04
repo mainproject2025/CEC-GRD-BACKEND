@@ -214,29 +214,49 @@ function optimizeHallUtilization(allocation, hallsData, spb) {
 /* ================================
    FIRESTORE SERIALIZER (SAFE)
 ================================ */
-function serializeAllocation(allocation) {
-  const out = {};
+function serializeAllocationForFirestore(allocation) {
+  const result = {};
+
   for (const [hall, rows] of Object.entries(allocation)) {
-    out[hall] = [];
-    rows.forEach((row, r) =>
-      row.forEach((bench, b) =>
+    const totalRows = rows.length;
+    const totalColumns = rows[0]?.length || 0;
+
+    const hallData = {
+      rows: totalRows,
+      columns: totalColumns,
+    };
+
+    rows.forEach((row, r) => {
+      const rowStudents = [];
+
+      row.forEach((bench, b) => {
         bench.forEach((s, i) => {
-          out[hall].push({
-            name: s.Name || s["Student Name"] || null,
+          if (!s) return;
+
+          rowStudents.push({
+            // 🔥 ONLY PRIMITIVES (Firestore safe)
             roll: s.RollNumber || s.Roll || s["Roll Number"] || null,
-            subject: s.subject,
-            year: s.year,
+
+            name: s.Name || s["StudentName"] || null,
+
+            year: s.year || null,
             batch: s.Batch || s["Batch"] || null,
-            row: r + 1,
+
             bench: b + 1,
             seat: i + 1,
           });
-        })
-      )
-    );
+        });
+      });
+
+      hallData[`row${r}`] = rowStudents;
+    });
+
+    result[hall] = hallData;
   }
-  return out;
+
+  return result;
 }
+
 
 /* ================================
    🚀 EXPRESS ROUTE
@@ -277,14 +297,20 @@ router.post(
       );
 
       optimizeHallUtilization(allocation, hallsData, studentsPerBench);
-
-      const doc = await db.collection("subjectAllocations").add({
+      let name=req.body.examName
+      let sems=req.body.years
+      let types=req.body.type
+      const doc = await db.collection("examAllocations").add({
         meta: {
           studentsPerBench,
           totalStudents: merged.length,
+          
         },
-        halls: serializeAllocation(allocation),
+        halls: serializeAllocationForFirestore(allocation),
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        name,
+        sems,
+        isElective:type==='Normal'?false:true
       });
 
       res.json({

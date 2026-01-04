@@ -148,8 +148,8 @@ function serializeForFirestore(hallName, grid) {
         hall: hallName,
         row: r + 1,
         column: c + 1,
-        roll: s["Roll Number"] || null,
-        name: s["Student Name"] || s.Name || null,
+        roll: s["RollNumber"] || null,
+        name: s["StudentName"] || s.Name || null,
         branch: s.Branch || null,
         subject: s.subject || null,
       });
