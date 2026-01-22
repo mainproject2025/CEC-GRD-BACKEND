@@ -67,6 +67,7 @@ function shuffleArray(arr) {
   }
 }
 
+
 /* ================================
    ALLOCATION
 ================================ */
@@ -284,6 +285,8 @@ function checkDuplicateStudents(allocation) {
 function serializeAllocationForFirestore(allocation) {
   const result = {};
 
+  
+  
   for (const [hall, rows] of Object.entries(allocation)) {
     const totalRows = rows.length;
     const totalColumns = rows[0]?.length || 0;
@@ -301,7 +304,7 @@ function serializeAllocationForFirestore(allocation) {
           if (!s) return;
 
           rowStudents.push({
-            // 🔥 ONLY PRIMITIVES (Firestore safe)
+            
             roll: s.RollNumber || s.Roll || s["Roll Number"] || null,
 
             name: s.Name || s["Student Name"] || null,
@@ -338,7 +341,7 @@ async function storeAllocationInFirestore(allocation, meta,name,sems,type) {
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
     name,
     sems,
-    isElective:type==='Normal'?false:true
+    isElective:type==='Normal'?false:true,
   });
 
   return ref.id;

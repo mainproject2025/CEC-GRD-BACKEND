@@ -1,33 +1,18 @@
 const path = require("path");
 const multer = require("multer");
 const fs = require("fs");
-const PDFDocument = require("pdfkit");
-const archiver = require("archiver");
 const express = require("express");
- 
 
 const router = express.Router();
-const { admin, db } = require("../config/firebase");
-
-
-if (!fs.existsSync("uploads")) fs.mkdirSync("uploads");
 const upload = multer({ dest: "uploads/" });
 
-/* ================================
-   CONFIG
-================================ */
-const CONFIG = {
-  PAGE: { width: 595.28, height: 841.89, margin: 40 },
-  CELL_HEIGHT: 30,
-  OPTIMIZATION_CYCLES: 25000,
-};
+const { admin, db } = require("../config/firebase");
 
 /* ================================
-   CSV PARSER
+   CSV → JSON
 ================================ */
-function robustCSVParser(csvData) {
-  const lines = csvData.trim().split(/\r?\n/);
-  if (lines.length < 2) return [];
+function excelToCsv(csvData) {
+  const lines = csvData.replace(/\r\n/g, "\n").split("\n").filter(Boolean);
   const headers = lines[0].split(",").map(h => h.trim());
   return lines.slice(1).map(line => {
     const values = line.split(",");
@@ -39,204 +24,266 @@ function robustCSVParser(csvData) {
 }
 
 /* ================================
-   CLEANUP
+   UTILS
 ================================ */
-const cleanupFiles = (files) => {
-  files.forEach(f => {
-    if (f && fs.existsSync(f)) fs.unlinkSync(f);
-  });
-};
+function shuffleArray(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
 
 /* ================================
-   STAGE 1: DISTRIBUTION
+   SUBJECT GROUPING (CORE CHANGE)
 ================================ */
-function stage1_DistributeToHalls(halls, studentsRaw) {
-  const subjectGroups = {};
-  studentsRaw.forEach(s => {
-    const sub = s.Subject || s.Code || s.Branch || "Unknown";
-    subjectGroups[sub] ??= [];
-    subjectGroups[sub].push(s);
+function groupStudentsBySubject(students) {
+  const map = {};
+  students.forEach(s => {
+    const subject = s.Common_Subject_1 || s.Subject || "Unknown";
+    map[subject] ??= [];
+    map[subject].push(s.RollNumber);
   });
+  return map;
+}
 
-  const sortedSubjects = Object.keys(subjectGroups)
-    .sort((a, b) => subjectGroups[b].length - subjectGroups[a].length);
+function buildRollToSubject(students) {
+  const map = {};
+  students.forEach(s => {
+    map[s.RollNumber] = s.Common_Subject_1 || s.Subject || "Unknown";
+  });
+  return map;
+}
 
-  const hallBuckets = halls.map(h => ({
-    details: h,
-    capacity: Number(h.Rows) * Number(h.Columns),
-    assigned: [],
-  }));
+function buildRollToInfo(students) {
+  const map = {};
+  students.forEach(s => {
+    map[s.RollNumber] = {
+      name: s.StudentName || "",
+      batch: s.Batch || "",
+      year: s.year || "",
+      subject: s.Common_Subject_1 || s.Subject || ""
+    };
+  });
+  return map;
+}
 
-  hallBuckets.sort((a, b) => b.capacity - a.capacity);
+/* ================================
+   CAPACITY
+================================ */
+function getHallCapacity(hall, twoPerBench) {
+  const R = Number(hall.Rows);
+  const C = Number(hall.Columns);
+  let cap = 0;
+  for (let r = 0; r < R; r++)
+    for (let c = 0; c < C; c++) {
+      if (twoPerBench && c % 3 === 1) continue;
+      cap++;
+    }
+  return cap;
+}
 
-  let s1 = sortedSubjects.shift();
-  let s2 = sortedSubjects.shift();
+function calculateTotalCapacity(halls, twoPerBench) {
+  return halls.reduce((s, h) => s + getHallCapacity(h, twoPerBench), 0);
+}
 
-  for (const bucket of hallBuckets) {
-    while (bucket.assigned.length < bucket.capacity) {
-      if (!s1 && sortedSubjects.length) s1 = sortedSubjects.shift();
-      if (!s2 && sortedSubjects.length) s2 = sortedSubjects.shift();
-      if (!s1 && !s2) break;
+/* ================================
+   CORE ALLOCATION (SUBJECT ROTATION)
+================================ */
+function allocateHall(hall, groups, pointers, order, startOffset, twoPerBench) {
+  const R = Number(hall.Rows);
+  const C = Number(hall.Columns);
+  const seats = Array.from({ length: R }, () => Array(C).fill(null));
+  let count = 0;
 
-      const target = s1 || s2;
-      if (subjectGroups[target]?.length) {
-        bucket.assigned.push({ ...subjectGroups[target].shift(), subject: target });
-        if (!subjectGroups[target].length) {
-          if (target === s1) s1 = null;
-          else s2 = null;
+  for (let r = 0; r < R; r++) {
+    for (let c = 0; c < C; c++) {
+      if (twoPerBench && c % 3 === 1) continue;
+
+      const logical = twoPerBench ? c - Math.floor(c / 3) : c;
+      const base = (logical + startOffset) % order.length;
+
+      for (let k = 0; k < order.length; k++) {
+        const key = order[(base + k) % order.length];
+        if (pointers[key] < groups[key].length) {
+          seats[r][c] = groups[key][pointers[key]++];
+          count++;
+          break;
         }
-      } else {
-        if (target === s1) s1 = null;
-        else s2 = null;
       }
     }
   }
-  return hallBuckets;
+  return { seats, count };
 }
 
 /* ================================
-   STAGE 2: RANDOMIZE
+   RANDOMIZE WITHIN SUBJECT
 ================================ */
-function stage2_Randomize(hallBuckets) {
-  hallBuckets.forEach(b => {
-    for (let i = b.assigned.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [b.assigned[i], b.assigned[j]] = [b.assigned[j], b.assigned[i]];
-    }
+function randomizeSeatsBySubject(seats, rollToSubject) {
+  const buckets = {};
+  seats.forEach((row, r) =>
+    row.forEach((roll, c) => {
+      if (!roll) return;
+      const sub = rollToSubject[roll];
+      buckets[sub] ??= [];
+      buckets[sub].push({ r, c, roll });
+    })
+  );
+
+  Object.values(buckets).forEach(bucket => {
+    const shuffled = shuffleArray(bucket.map(b => b.roll));
+    bucket.forEach((pos, i) => {
+      seats[pos.r][pos.c] = shuffled[i];
+    });
   });
-  return hallBuckets;
+
+  return seats;
 }
 
 /* ================================
-   STAGE 3: OPTIMIZE (UNCHANGED)
+   SUBJECT ADJACENCY FIX
 ================================ */
-function stage3_OptimizeSeating(bucket) {
-  const rows = Number(bucket.details.Rows);
-  const cols = Number(bucket.details.Columns);
-  const grid = Array.from({ length: rows }, () => Array(cols).fill(null));
-  let i = 0;
-  for (let r = 0; r < rows; r++)
-    for (let c = 0; c < cols; c++)
-      grid[r][c] = bucket.assigned[i++] || null;
-  return grid;
-}
+function fixSameSubjectAdjacency(arr, rollToSubject) {
+  const R = arr.length, C = arr[0].length;
 
-/* ================================
-   STAGE 4: EVALUATE
-================================ */
-function stage4_Evaluate(grid) {
-  let conflicts = 0, filled = 0;
-  for (let r = 0; r < grid.length; r++)
-    for (let c = 0; c < grid[0].length; c++) {
-      if (!grid[r][c]) continue;
-      filled++;
-      if (c + 1 < grid[0].length && grid[r][c+1]?.subject === grid[r][c].subject) conflicts++;
-      if (r + 1 < grid.length && grid[r+1][c]?.subject === grid[r][c].subject) conflicts++;
+  for (let pass = 0; pass < 50; pass++) {
+    let clean = true;
+
+    for (let r = 0; r < R; r++) {
+      for (let c = 0; c < C - 1; c++) {
+        const a = arr[r][c];
+        const b = arr[r][c + 1];
+        if (!a || !b) continue;
+
+        if (rollToSubject[a] === rollToSubject[b]) {
+          clean = false;
+          search:
+          for (let i = r + 1; i < R; i++) {
+            for (let j = 0; j < C; j++) {
+              const x = arr[i][j];
+              if (x && rollToSubject[x] !== rollToSubject[a]) {
+                [arr[r][c + 1], arr[i][j]] = [x, b];
+                break search;
+              }
+            }
+          }
+        }
+      }
     }
-  return { conflicts, filled };
+    if (clean) break;
+  }
+  return arr;
 }
 
 /* ================================
-   FIRESTORE SAFE SERIALIZER ✅
+   MAIN GENERATOR
 ================================ */
-function serializeForFirestore(hallName, grid) {
-  const students = [];
-  grid.forEach((row, r) => {
-    row.forEach((s, c) => {
-      if (!s) return;
-      students.push({
-        hall: hallName,
+function generateSeatingPlan(halls, groups, rollToSubject) {
+  const order = Object.keys(groups);
+  const pointers = Object.fromEntries(order.map(k => [k, 0]));
+  const totalStudents = Object.values(groups).reduce((s, g) => s + g.length, 0);
+
+  const globalTwoBench =
+    totalStudents <= calculateTotalCapacity(halls, true);
+
+  const result = [];
+
+  halls.forEach((hall, idx) => {
+    let useTwoBench = globalTwoBench;
+    if (!globalTwoBench) {
+      const cap2 = getHallCapacity(hall, true);
+      const cap3 = getHallCapacity(hall, false);
+      if (cap3 <= cap2) useTwoBench = true;
+    }
+
+    let { seats } = allocateHall(
+      hall, groups, pointers, order, idx, useTwoBench
+    );
+
+    seats = randomizeSeatsBySubject(seats, rollToSubject);
+    seats = fixSameSubjectAdjacency(seats, rollToSubject);
+
+    result.push({
+      hallName: hall.HallName,
+      seats,
+      maxBench: useTwoBench ? 2 : 3
+    });
+  });
+
+  return result;
+}
+
+/* ================================
+   FIRESTORE FORMAT
+================================ */
+function formatForFirestore(hall, seats, rollToInfo) {
+  const hallData = {
+    rows: Number(hall.Rows),
+    columns: Number(hall.Columns),
+  };
+
+  let seatNo = 1;
+  seats.forEach((row, r) => {
+    const arr = [];
+    row.forEach((roll, c) => {
+      if (!roll) return;
+      const info = rollToInfo[roll];
+      arr.push({
+        roll,
+        name: info.name,
+        batch: info.batch,
+        year: info.year,
+        subject: info.subject,
+        hall: hall.HallName,
         row: r + 1,
-        column: c + 1,
-        roll: s["RollNumber"] || null,
-        name: s["StudentName"] || s.Name || null,
-        branch: s.Branch || null,
-        subject: s.subject || null,
+        bench: c + 1,
+        seat: seatNo++
       });
     });
+    if (arr.length) hallData[`row${r}`] = arr;
   });
-  return students;
+
+  return hallData;
 }
 
 /* ================================
-   PDF (NO COLORS)
-================================ */
-function generateSeatingPDF(hallName, grid, stats, filePath) {
-  return new Promise(resolve => {
-    const doc = new PDFDocument({ margin: CONFIG.PAGE.margin, size: "A4" });
-    doc.pipe(fs.createWriteStream(filePath));
-
-    doc.fontSize(14).text(`Hall: ${hallName}`, { align: "center" });
-    doc.text(`Conflicts: ${stats.conflicts}`, { align: "center" });
-    doc.moveDown();
-
-    const cols = grid[0].length;
-    const cellW = (CONFIG.PAGE.width - CONFIG.PAGE.margin * 2) / cols;
-    let y = doc.y;
-
-    grid.forEach(row => {
-      let x = CONFIG.PAGE.margin;
-      row.forEach(s => {
-        doc.rect(x, y, cellW, CONFIG.CELL_HEIGHT).stroke();
-        doc.text(s ? s["Roll Number"] : "-", x, y + 10, { width: cellW, align: "center" });
-        x += cellW;
-      });
-      y += CONFIG.CELL_HEIGHT;
-    });
-
-    doc.end();
-    resolve();
-  });
-}
-
-/* ================================
-   API ENDPOINT
+   API
 ================================ */
 router.post(
   "/",
   upload.fields([{ name: "students" }, { name: "halls" }]),
   async (req, res) => {
-    const tempFiles = [];
     try {
-      const students = robustCSVParser(fs.readFileSync(req.files.students[0].path, "utf8"));
-      const halls = robustCSVParser(fs.readFileSync(req.files.halls[0].path, "utf8"));
+      const students = excelToCsv(fs.readFileSync(req.files.students[0].path, "utf8"));
+      const halls = shuffleArray(excelToCsv(fs.readFileSync(req.files.halls[0].path, "utf8")));
 
-      let buckets = stage1_DistributeToHalls(halls, students);
-      buckets = stage2_Randomize(buckets);
+      const groups = groupStudentsBySubject(students);
+      const rollToSubject = buildRollToSubject(students);
+      const rollToInfo = buildRollToInfo(students);
 
-      const outputDir = path.join(__dirname, "output", Date.now().toString());
-      fs.mkdirSync(outputDir, { recursive: true });
+      const raw = generateSeatingPlan(halls, groups, rollToSubject);
 
-      const firestoreData = {};
-      const pdfs = [];
-
-      for (const bucket of buckets) {
-        if (!bucket.assigned.length) continue;
-
-        const grid = stage3_OptimizeSeating(bucket);
-        const stats = stage4_Evaluate(grid);
-        const hallName = bucket.details.RoomName || "Hall";
-
-        firestoreData[hallName] = serializeForFirestore(hallName, grid);
-
-         
-      }
-
-      const docRef = await db.collection("examAllocations").add({
-        halls: firestoreData,
-        meta: {
-          hallsCount: Object.keys(firestoreData).length,
-        },
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      const firestoreHalls = {};
+      raw.forEach(r => {
+        const hall = halls.find(h => h.HallName === r.hallName);
+        firestoreHalls[r.hallName] = formatForFirestore(hall, r.seats, rollToInfo);
       });
 
-      res.setHeader("Content-Type", "application/zip");
-      res.setHeader("Content-Disposition", "attachment; filename=Exam_Seating.zip");
+      const doc = await db.collection("examAllocations").add({
+        name: req.body.examName,
+        sems: req.body.years,
+        isElective: req.body.type !== "Normal",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        meta: {
+          totalStudents: students.length,
+          totalHalls: halls.length,
+          studentsPerBench: raw[0]?.maxBench || 0
+        },
+        halls: firestoreHalls
+      });
 
-      
-
+      res.json({ success: true, documentId: doc.id });
     } catch (err) {
-      cleanupFiles(tempFiles);
       console.error(err);
       res.status(500).json({ error: err.message });
     }

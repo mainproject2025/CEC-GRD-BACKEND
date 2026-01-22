@@ -3,6 +3,16 @@ const router = express.Router();
 const { db } = require("../../config/firebase");
 
 /* ================================
+   UTIL: FORMAT DATE + HALF DAY
+================================ */
+function formatWithHalfDay(dateTimeStr) {
+  const [date, time] = dateTimeStr.split("T");
+  const hour = parseInt(time.split(":")[0], 10);
+  const period = hour < 12 ? "Forenoon" : "Afternoon";
+  return `${date} ${period}`;
+}
+
+/* ================================
    GET ALL EXAMS (LIGHTWEIGHT)
    GET /exams
 ================================ */
@@ -13,15 +23,16 @@ router.get("/", async (req, res) => {
       .orderBy("createdAt", "desc")
       .get();
 
-    const exams = snap.docs.map(doc => {
+    const exams = snap.docs.map((doc) => {
       const data = doc.data();
 
       return {
         examId: doc.id,
         examName: data.name || "Unnamed Exam",
         sems: data.sems || [],
-        isElective:data.isElective,
-        createdAt:'1/1/2026'
+        isElective: data.isElective,
+        isPublished: data.isPublished ?? false, // ✅ include publish state
+        createdAt: formatWithHalfDay(data.examDate),
       };
     });
 
@@ -35,6 +46,42 @@ router.get("/", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch exams",
+    });
+  }
+});
+
+/* ================================
+   UPDATE isPublished
+   PATCH /exams/:id/publish
+================================ */
+router.patch("/:id/publish", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isPublished } = req.body;
+
+    const ref = db.collection("examAllocations").doc(id);
+    const doc = await ref.get();
+
+    if (!doc.exists) {
+      return res.status(404).json({
+        success: false,
+        message: "Exam not found",
+      });
+    }
+
+    await ref.update({
+      isPublished:true
+    });
+
+    res.json({
+      success: true,
+      message: `Exam ${isPublished ? "published" : "unpublished"} successfully`,
+    });
+  } catch (err) {
+    console.error("PUBLISH EXAM ERROR:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update publish status",
     });
   }
 });

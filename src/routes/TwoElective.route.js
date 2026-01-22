@@ -310,7 +310,7 @@ router.post(
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         name,
         sems,
-        isElective:type==='Normal'?false:true
+        isElective:types==='Normal'?false:true
       });
 
       res.json({

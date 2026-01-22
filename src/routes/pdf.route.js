@@ -113,7 +113,7 @@ async function generateHallSeatingPDF(allocation, outputDir) {
         .grid td { width: 50px; text-align: center; }
       </style>
 
-      <h1>Hall Seating Arrangement</h1>
+      <h1>Hall Seating Arrangement (Generated Using CEC-GRID)</h1>
       <h2>Hall: ${hallName}</h2>
     `;
 

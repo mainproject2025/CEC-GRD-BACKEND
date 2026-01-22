@@ -315,7 +315,7 @@ function convertSeatingToFirestoreFormat(hall, seats) {
 /* ================================
    SAVE TO FIRESTORE
 ================================ */
-async function saveAllocationToFirestore(hallAllocations, metadata, name, sem,type) {
+async function saveAllocationToFirestore(hallAllocations, metadata, name, sem,type,examDate,mode) {
   const docRef = db.collection("examAllocations").doc();
   
   const firestoreData = {
@@ -324,7 +324,10 @@ async function saveAllocationToFirestore(hallAllocations, metadata, name, sem,ty
     meta: metadata,
     name: name,
     sems: sem,
-    isElective:type==='Normal'?false:true
+    isElective:type==='Normal'?false:true,
+    examDate:examDate,
+    mode:mode,
+    isPublished:false
   };
 
   hallAllocations.forEach(({ hallName, allocation }) => {
@@ -367,7 +370,7 @@ router.post("/", upload.fields([{ name: "students" }, { name: "halls" }]), async
       studentsPerBench: finalAllocations[0]?.maxBench || 0
     };
 
-    const docId = await saveAllocationToFirestore(finalAllocations, metadata, req.body.examName, req.body.years,req.body.type);
+    const docId = await saveAllocationToFirestore(finalAllocations, metadata, req.body.examName, req.body.years,req.body.type,req.body.examDate,req.body.mode);
 
     res.json({ success: true, documentId: docId });
 

@@ -120,7 +120,7 @@ async function generateHallSeatingPDF(allocation, outputDir = "output") {
         .grid td { width: 50px; text-align: center; }
       </style>
 
-      <h1>Hall Seating Arrangement</h1>
+      <h1>Hall Seating Arrangement (Generated Using CEC-GRID)</h1>
       <h2>Hall: ${hallName}</h2>
     `;
 
@@ -225,7 +225,7 @@ async function generateHallYearBatchRollSummaryPDF(allocation, outputDir = "outp
       th { background: #f0f0f0; }
     </style>
 
-    <h1>Hall Allocation Summary (Year & Batch-wise)</h1>
+    <h1>Hall Allocation Summary (Generated Using CEC-GRID)</h1>
   `;
 
   for (const [hallName, rows] of Object.entries(allocation)) {
