@@ -6,7 +6,7 @@
   "repository": "https://github.com/mainproject2025/CEC-GRD-BACKEND.git",
   "private": false,
   "scripts": {
-    "start": "npm start",
+    "start": "node src/server.js",
     "dev": "nodemon src/server.js"
   },
   "dependencies": {
