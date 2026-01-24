@@ -3,6 +3,8 @@ const fs = require("fs");
 const cors = require("cors");
 
 const app = express();
+import dotenv from "dotenv";
+dotenv.config();
 
 app.use(cors());
 app.use(express.json());
@@ -39,10 +41,17 @@ app.use("/notification", notifications);
 
 // ✅ HALL CRUD API
 app.use("/halls", fetchHalls);
+app.get("/", (req, res) => {
+  return res.send({
+    status: "Server is Healthy"
+  });
+});
 
 /* ======================
    START SERVER
 ====================== */
-app.listen(5001, () => {
-  console.log("🚀 Server running on http://localhost:5001");
+const PORT = process.env.PORT || 5001;
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
