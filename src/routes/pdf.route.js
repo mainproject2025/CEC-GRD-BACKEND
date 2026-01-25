@@ -16,14 +16,17 @@ let browser; // global instance
 async function initBrowser() {
   if (!browser) {
     browser = await puppeteer.launch({
-      executablePath: puppeteer.executablePath(), // IMPORTANT
+      executablePath:
+        process.env.PUPPETEER_EXECUTABLE_PATH ||
+        "/opt/render/.cache/puppeteer/chrome/linux-143.0.7499.169/chrome-linux64/chrome",
+
       headless: "new",
+
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
-        "--no-zygote",
       ],
     });
   }
