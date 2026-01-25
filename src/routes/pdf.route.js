@@ -6,9 +6,30 @@ const archiver = require("archiver");
 
 const router = express.Router();
 const { admin, db } = require("../config/firebase");
-const { log } = require("util");
-const { all } = require("./pdf.route");
 
+/* =====================================================
+   Reusable Browser Instance
+===================================================== */
+
+let browser; // global instance
+
+async function initBrowser() {
+  if (!browser) {
+    browser = await puppeteer.launch({
+      executablePath: puppeteer.executablePath(), // IMPORTANT
+      headless: "new",
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-zygote",
+      ],
+    });
+  }
+
+  return browser;
+}
 /* =========================================================
    🔁 RECONSTRUCT allocation MATRIX from Firestore
 ========================================================= */
