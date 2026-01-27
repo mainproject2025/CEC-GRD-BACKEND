@@ -188,10 +188,6 @@ function generateHallHTML(allocation) {
 
       html += `</table>`;
     }
-
-     
-    
-
     hallHTMLs[hallName] = html;
   }
 
