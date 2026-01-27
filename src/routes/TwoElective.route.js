@@ -241,7 +241,7 @@ function serializeAllocationForFirestore(allocation) {
 
             year: s.year || null,
             batch: s.Batch || s["Batch"] || null,
-
+            isPublished:false,
             bench: b + 1,
             seat: i + 1,
           });
