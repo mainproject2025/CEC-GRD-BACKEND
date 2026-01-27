@@ -90,22 +90,50 @@ function calculateTotalCapacity(halls, twoPerBench) {
 /* ================================
    CORE ALLOCATION (SUBJECT ROTATION)
 ================================ */
-function allocateHall(hall, groups, pointers, order, startOffset, twoPerBench) {
+function allocateHall(
+  hall,
+  groups,
+  pointers,
+  order,
+  startOffset,
+  twoPerBench
+) {
+
   const R = Number(hall.Rows);
   const C = Number(hall.Columns);
+
   const seats = Array.from({ length: R }, () => Array(C).fill(null));
+
   let count = 0;
 
   for (let r = 0; r < R; r++) {
+
+    // Flip every row (AB / BA)
+    const rowOffset = r % 2 === 0 ? 0 : 1;
+
     for (let c = 0; c < C; c++) {
+
+      // Skip middle seat if 2/bench
       if (twoPerBench && c % 3 === 1) continue;
 
-      const logical = twoPerBench ? c - Math.floor(c / 3) : c;
-      const base = (logical + startOffset) % order.length;
+      // Logical column
+      let logical = c;
 
+      if (twoPerBench) {
+        logical = c - Math.floor(c / 3);
+      }
+
+      // Subject index
+      const base =
+        (logical + rowOffset + startOffset) % order.length;
+
+      // Allocate
       for (let k = 0; k < order.length; k++) {
+
         const key = order[(base + k) % order.length];
+
         if (pointers[key] < groups[key].length) {
+
           seats[r][c] = groups[key][pointers[key]++];
           count++;
           break;
@@ -113,8 +141,10 @@ function allocateHall(hall, groups, pointers, order, startOffset, twoPerBench) {
       }
     }
   }
+
   return { seats, count };
 }
+
 
 /* ================================
    RANDOMIZE WITHIN SUBJECT
@@ -200,8 +230,9 @@ function generateSeatingPlan(halls, groups, rollToSubject) {
       hall, groups, pointers, order, idx, useTwoBench
     );
 
-    seats = randomizeSeatsBySubject(seats, rollToSubject);
+    // seats = randomizeSeatsBySubject(seats, rollToSubject);
     seats = fixSameSubjectAdjacency(seats, rollToSubject);
+    printHallAllocation(hall.HallName, seats, rollToSubject);
 
     result.push({
       hallName: hall.HallName,
@@ -212,6 +243,31 @@ function generateSeatingPlan(halls, groups, rollToSubject) {
 
   return result;
 }
+
+
+
+function printHallAllocation(name, seats, rollToSubject) {
+
+  console.log("\n=============================");
+  console.log("Hall:", name);
+  console.log("=============================");
+
+  seats.forEach((row, i) => {
+
+    const line = row.map(s => {
+
+      if (!s) return " --- ";
+
+      return `${rollToSubject[s]}-${s}`;
+    });
+
+    console.log(`Row ${i + 1}:`, line.join(" | "));
+  });
+
+  console.log("=============================\n");
+}
+
+
 
 /* ================================
    FIRESTORE FORMAT
@@ -269,6 +325,8 @@ router.post(
         firestoreHalls[r.hallName] = formatForFirestore(hall, r.seats, rollToInfo);
       });
 
+      console.log(req.body.examDate);
+      
       const doc = await db.collection("examAllocations").add({
         name: req.body.examName,
         sems: req.body.years,
@@ -279,9 +337,10 @@ router.post(
           totalHalls: halls.length,
           studentsPerBench: raw[0]?.maxBench || 0
         },
-        halls: firestoreHalls
+        halls: firestoreHalls,
+        examDate:req.body.examDate
       });
-
+       
       res.json({ success: true, documentId: doc.id });
     } catch (err) {
       console.error(err);

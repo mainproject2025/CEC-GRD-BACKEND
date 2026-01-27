@@ -17,7 +17,7 @@ function reconstructAllocation(hallsData) {
     if (!R || !C) continue;
 
     const matrix = Array.from({ length: R }, () =>
-      Array.from({ length: C }, () => [])
+      Array.from({ length: C }, () => []),
     );
 
     for (const [key, value] of Object.entries(hallData)) {
@@ -71,8 +71,8 @@ function generateHallHTML(allocation) {
             year: s.year,
             row: rIdx + 1,
           });
-        })
-      )
+        }),
+      ),
     );
 
     const yearMap = {};
@@ -83,7 +83,7 @@ function generateHallHTML(allocation) {
     });
 
     Object.values(yearMap).forEach((arr) =>
-      arr.sort((a, b) => a.name.localeCompare(b.name))
+      arr.sort((a, b) => a.name.localeCompare(b.name)),
     );
 
     let html = `
@@ -128,10 +128,33 @@ function generateHallHTML(allocation) {
       html += `</table>`;
     }
 
+    html += `<div class="page-break"></div><h2>Grid</h2><table class="grid">`;
+    const maxSeatsPerBench = Math.max(
+      ...rows.flatMap((row) => row.map((bench) => bench.length)),
+    );
+
+    html += "<tr><td></td>";
+    rows[0].forEach((bench, i) => {
+      html += `<th>${String.fromCharCode(65 + i)}</th>`;
+    });
+    html += "</tr>";
+
+    rows.forEach((row) => {
+      html += "<tr>";
+      row.forEach((bench) => {
+        for (let i = 0; i < maxSeatsPerBench; i++) {
+          const s = bench[i];
+          html += `<td>${s ? s.RollNumber : ""}</td>`;
+        }
+      });
+      html += "</tr>";
+    });
+
+    html += "</table>";
+    html += `<div class="page-break"></div><h1>Attendance Sheet</h1><table class="grid">`;
     /* Attendance Sheet */
 
     html += `
-    <h1>Attendance Sheet</h1>
     <h2>${hallName}</h2>
     `;
 
@@ -200,8 +223,8 @@ function generateSummaryHTML(allocation) {
           map[year][batch] ??= [];
 
           map[year][batch].push(roll);
-        })
-      )
+        }),
+      ),
     );
 
     html += `
@@ -228,7 +251,7 @@ function generateSummaryHTML(allocation) {
             <td>${map[year][batch].sort().join(", ")}</td>
           </tr>
           `;
-          })
+          }),
       );
 
     html += `</table>`;

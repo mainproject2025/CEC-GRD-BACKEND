@@ -51,11 +51,11 @@ function evaluateBenchCapacity(hallsData, totalStudents) {
 /* ================================
    PATTERN (ONLY FOR 3 PER BENCH)
 ================================ */
-function getPatternForHall(hallIndex) {
-  return hallIndex % 2 === 0
-    ? ["A", "B", "A", "A", "B", "A"]
-    : ["B", "A", "B", "B", "A", "B"];
-}
+// function getPatternForHall(hallIndex) {
+//   return hallIndex % 2 === 0
+//     ? ["A", "B", "A", "A", "B", "A"]
+//     : ["B", "A", "B", "B", "A", "B"];
+// }
 
 /* ================================
    SHUFFLE
@@ -67,7 +67,6 @@ function shuffleArray(arr) {
   }
 }
 
-
 /* ================================
    ALLOCATION
 ================================ */
@@ -78,54 +77,106 @@ function allocateStudents(
   hallsData,
   studentsPerBench
 ) {
+
   const A = [...allStudents[yearA]];
   const B = [...allStudents[yearB]];
-  let iA = 0,
-    iB = 0;
+
+  let iA = 0;
+  let iB = 0;
+
   const allocation = {};
 
   hallsData.forEach((hall, hallIndex) => {
+
     const rows = Number(hall.Rows);
+
+    // Number of benches in one row
     const benchesPerRow = Math.floor(Number(hall.Columns) / 3);
+
     const hallName = hall.HallName;
+
     const hallMatrix = [];
-    const pattern =
-      studentsPerBench === 3 ? getPatternForHall(hallIndex) : null;
-    let p = 0;
 
     for (let r = 0; r < rows; r++) {
+
+      // Flip every row
+      // Row 0 → ABAB
+      // Row 1 → BABA
+      const rowOffset = r % 2 === 0 ? 0 : 1;
+
       const row = [];
+
       for (let b = 0; b < benchesPerRow; b++) {
+
         const bench = [];
 
         if (studentsPerBench === 2) {
-          if (iA < A.length) bench.push({ ...A[iA++], year: yearA });
-          if (iB < B.length) bench.push({ ...B[iB++], year: yearB });
+
+          // 2 seats: A B or B A
+          const order = rowOffset === 0 ? ["A", "B"] : ["B", "A"];
+
+          order.forEach(o => {
+
+            let student = null;
+
+            if (o === "A" && iA < A.length)
+              student = { ...A[iA++], year: yearA };
+
+            if (o === "B" && iB < B.length)
+              student = { ...B[iB++], year: yearB };
+
+            if (!student && iA < A.length)
+              student = { ...A[iA++], year: yearA };
+
+            if (!student && iB < B.length)
+              student = { ...B[iB++], year: yearB };
+
+            if (student) bench.push(student);
+          });
+
         } else {
+
+          // 3 seats: AB A / BA B
           for (let s = 0; s < 3; s++) {
-            const pick = pattern[p % pattern.length];
+
+            const seatIndex = b * 3 + s;
+
+            // Decide A or B
+            const pick =
+              (seatIndex + rowOffset + hallIndex) % 2 === 0
+                ? "A"
+                : "B";
+
             let student = null;
 
             if (pick === "A" && iA < A.length)
               student = { ...A[iA++], year: yearA };
+
             else if (pick === "B" && iB < B.length)
               student = { ...B[iB++], year: yearB };
-            else if (iA < A.length) student = { ...A[iA++], year: yearA };
-            else if (iB < B.length) student = { ...B[iB++], year: yearB };
+
+            else if (iA < A.length)
+              student = { ...A[iA++], year: yearA };
+
+            else if (iB < B.length)
+              student = { ...B[iB++], year: yearB };
 
             if (student) bench.push(student);
-            p++;
           }
         }
+
         row.push(bench);
       }
+
       hallMatrix.push(row);
     }
+
     allocation[hallName] = hallMatrix;
   });
 
   return allocation;
 }
+
 
 /* ================================
    RANDOMIZATION
@@ -148,8 +199,8 @@ function randomizeHallYearWise(allocation, yearA, yearB) {
             posB.push([r, b, s]);
             stuB.push(student);
           }
-        })
-      )
+        }),
+      ),
     );
 
     shuffleArray(stuA);
@@ -171,7 +222,7 @@ function analyzeHall(hallMatrix) {
     row.forEach((bench) => {
       if (bench.length > 0) benchesUsed++;
       students += bench.length;
-    })
+    }),
   );
 
   return { students, benchesUsed };
@@ -180,7 +231,7 @@ function analyzeHall(hallMatrix) {
 function repackHallToTwoPerBench(hallMatrix) {
   const students = [];
   hallMatrix.forEach((r) =>
-    r.forEach((b) => b.forEach((s) => students.push(s)))
+    r.forEach((b) => b.forEach((s) => students.push(s))),
   );
   let idx = 0;
 
@@ -189,8 +240,28 @@ function repackHallToTwoPerBench(hallMatrix) {
       bench.length = 0;
       if (idx < students.length) bench.push(students[idx++]);
       if (idx < students.length) bench.push(students[idx++]);
-    })
+    }),
   );
+}
+
+function printHall(hallName, rows) {
+  console.log("\nHall:", hallName);
+
+  rows.forEach((row, r) => {
+    const line = [];
+
+    row.forEach((bench) => {
+      bench.forEach((s) => {
+        if (!s) return;
+
+        line.push(`${s.year}-${s.RollNumber || s.Roll}`);
+      });
+    });
+
+    console.log(`Row ${r + 1}:`, line.join(" | "));
+  });
+
+  console.log("----------------------------");
 }
 
 function optimizeHallUtilization(allocation, hallsData, studentsPerBench) {
@@ -232,8 +303,8 @@ function optimizeHallUtilization(allocation, hallsData, studentsPerBench) {
 
         [hallNames[i], hallNames[j]].forEach((h) =>
           allocation[h].forEach((r) =>
-            r.forEach((b) => b.forEach((s) => combined.push(s)))
-          )
+            r.forEach((b) => b.forEach((s) => combined.push(s))),
+          ),
         );
 
         let idx = 0;
@@ -243,8 +314,8 @@ function optimizeHallUtilization(allocation, hallsData, studentsPerBench) {
               bench.length = 0;
               if (idx < combined.length) bench.push(combined[idx++]);
               if (idx < combined.length) bench.push(combined[idx++]);
-            })
-          )
+            }),
+          ),
         );
       }
     }
@@ -275,8 +346,8 @@ function checkDuplicateStudents(allocation) {
           } else {
             seen.set(roll, { hall, row: r + 1, bench: b + 1 });
           }
-        })
-      )
+        }),
+      ),
     );
   }
   return duplicates;
@@ -285,8 +356,6 @@ function checkDuplicateStudents(allocation) {
 function serializeAllocationForFirestore(allocation) {
   const result = {};
 
-  
-  
   for (const [hall, rows] of Object.entries(allocation)) {
     const totalRows = rows.length;
     const totalColumns = rows[0]?.length || 0;
@@ -304,14 +373,12 @@ function serializeAllocationForFirestore(allocation) {
           if (!s) return;
 
           rowStudents.push({
-            
             roll: s.RollNumber || s.Roll || s["Roll Number"] || null,
 
             name: s.Name || s["Student Name"] || null,
-            
             year: s.year || null,
             batch: s.Batch || s["Batch"] || null,
-            isPublished:false,
+            isPublished: false,
             bench: b + 1,
             seat: i + 1,
           });
@@ -330,7 +397,14 @@ function serializeAllocationForFirestore(allocation) {
 /* ================================
    FIRESTORE STORAGE
 ================================ */
-async function storeAllocationInFirestore(allocation, meta,name,sems,type,examDate) {
+async function storeAllocationInFirestore(
+  allocation,
+  meta,
+  name,
+  sems,
+  type,
+  examDate,
+) {
   const ref = db.collection("examAllocations").doc();
 
   const safeAllocation = serializeAllocationForFirestore(allocation);
@@ -341,8 +415,8 @@ async function storeAllocationInFirestore(allocation, meta,name,sems,type,examDa
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
     name,
     sems,
-    isElective:type==='Normal'?false:true,
-    examDate:examDate,
+    isElective: type === "Normal" ? false : true,
+    examDate: examDate,
   });
 
   return ref.id;
@@ -363,7 +437,7 @@ router.post(
 
       const studentCSVs = req.files.students.map((f) => f.path);
       console.log(studentCSVs);
-        
+
       const hallsData = await parseCSV(hallsCSV);
 
       const allStudents = {};
@@ -386,30 +460,39 @@ router.post(
         yearA,
         yearB,
         hallsData,
-        evalResult.studentsPerBench
+        evalResult.studentsPerBench,
       );
 
-      randomizeHallYearWise(allocation, yearA, yearB);
       optimizeHallUtilization(
         allocation,
         hallsData,
-        evalResult.studentsPerBench
+        evalResult.studentsPerBench,
       );
+      Object.entries(allocation).forEach(([h, r]) => {
+        printHall(h, r);
+      });
 
       const duplicates = checkDuplicateStudents(allocation);
-      let ExamName=req.body.examName
-      let year=req.body.years
-      let examDate=req.body.examDate
-
-      const examId = await storeAllocationInFirestore(allocation, {
-        yearA,
-        yearB,
-        studentsPerBench: evalResult.studentsPerBench,
-        totalStudents,
-        duplicates,
-        examDate
-         
-      },req.body.examName, req.body.years,req.body.type)
+      let ExamName = req.body.examName;
+      let year = req.body.years;
+      let examDate = req.body.examDate;
+      console.log(req.body);
+      
+      const examId = await storeAllocationInFirestore(
+        allocation,
+        {
+          yearA,
+          yearB,
+          studentsPerBench: evalResult.studentsPerBench,
+          totalStudents,
+          duplicates,
+          
+        },
+        req.body.examName,
+        req.body.years,
+        req.body.type,
+        req.body.examDate
+      )
         .then(() => {
           console.log("fdsfdasf");
         })
@@ -423,7 +506,7 @@ router.post(
 
       res.status(500).json({ error: err.message });
     }
-  }
+  },
 );
 
 module.exports = router;

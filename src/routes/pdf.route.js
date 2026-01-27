@@ -18,7 +18,7 @@ function reconstructAllocation(hallsData) {
 
     // Create empty matrix
     const matrix = Array.from({ length: R }, () =>
-      Array.from({ length: C }, () => [])
+      Array.from({ length: C }, () => []),
     );
 
     for (const [key, value] of Object.entries(hallData)) {
@@ -70,11 +70,12 @@ function generateHallHTML(allocation) {
             name: student.Name || "N/A",
             roll: student.RollNumber || "N/A",
             year: student.year,
+            batch: student.batch,
             row: rIdx + 1,
             col: bIdx * 3 + sIdx + 1,
           });
-        })
-      )
+        }),
+      ),
     );
 
     const grouped = {};
@@ -85,7 +86,7 @@ function generateHallHTML(allocation) {
     });
 
     Object.values(grouped).forEach((arr) =>
-      arr.sort((a, b) => (a.row === b.row ? a.col - b.col : a.row - b.row))
+      arr.sort((a, b) => (a.row === b.row ? a.col - b.col : a.row - b.row)),
     );
 
     let html = `
@@ -130,23 +131,67 @@ function generateHallHTML(allocation) {
         html += "</table>";
       });
 
-      html += `<div class="page-break"></div><h2>Grid</h2><table class="grid">`;
+    html += `<div class="page-break"></div><h2>Grid</h2><table class="grid">`;
     const maxSeatsPerBench = Math.max(
-      ...rows.flatMap((row) => row.map((bench) => bench.length))
+      ...rows.flatMap((row) => row.map((bench) => bench.length)),
     );
-    rows.forEach((row) => {
+
+
+      html += "<tr><td></td>";
+      rows[0].forEach((bench,i) => {
+          html += `<th>${String.fromCharCode(65+i)}</th>`;
+      });
+      html += "</tr>";
+ 
+
+    rows.forEach((row,i) => {
       html += "<tr>";
+      html += `<th>${i+1}</th>`;
       row.forEach((bench) => {
         for (let i = 0; i < maxSeatsPerBench; i++) {
           const s = bench[i];
           html += `<td>${s ? s.RollNumber : ""}</td>`;
         }
       });
-      html += "</tr>";
+      html += "</th>";
     });
 
     html += "</table>";
+    html += `<div class="page-break"></div><h1>Attendance Sheet</h1><table class="grid">`;
+    html += `
+    <h2>${hallName}</h2>
+    `;
+
+    for (const year of Object.keys(grouped).sort()) {
+      html += `
+      <h3>Year: ${year}</h3>
+
+      <table>
+        <tr>
+          <th>Sl</th>
+          <th>Name</th>
+          <th>Roll</th>
+          <th>Signature</th>
+        </tr>
+      `;
+
+      grouped[year].forEach((s, i) => {
+        html += `
+        <tr>
+          <td>${i + 1}</td>
+          <td>${s.name}</td>
+          <td>${s.roll}</td>
+          <td></td>
+        </tr>
+        `;
+      });
+
+      html += `</table>`;
+    }
+
+     
     
+
     hallHTMLs[hallName] = html;
   }
 
@@ -179,8 +224,8 @@ function generateSummaryHTML(allocation) {
           map[s.year] ??= {};
           map[s.year][s.Batch ?? "UNKNOWN"] ??= [];
           map[s.year][s.Batch ?? "UNKNOWN"].push(s.RollNumber);
-        })
-      )
+        }),
+      ),
     );
 
     html += `<h3>Hall: ${hall}</h3>
@@ -207,7 +252,7 @@ function generateSummaryHTML(allocation) {
           <td>${rolls.length}</td>
         </tr>
       `;
-      })
+      }),
     );
 
     html += "</table>";
@@ -223,7 +268,7 @@ router.post("/", async (req, res) => {
   try {
     const { examId } = req.body;
     console.log(req.body);
-    
+
     if (!examId) {
       return res.status(400).json({ error: "examId is required" });
     }

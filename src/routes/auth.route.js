@@ -61,7 +61,8 @@ router.post("/login", async (req, res) => {
     }
 
     const decoded = await admin.auth().verifyIdToken(idToken);
-
+    console.log(decoded.uid);
+    
     const snap = await db.collection("users").doc(decoded.uid).get();
     if (!snap.exists) {
       return res.status(404).json({
