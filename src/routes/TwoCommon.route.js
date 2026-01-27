@@ -16,7 +16,6 @@ const router = express.Router();
 const upload = multer({ dest: "uploads/" });
 // router.use(express.json());
 let StudYears={}
-let NewStudYears={}
 /* ================================
    CSV PARSER
 ================================ */
@@ -372,12 +371,12 @@ function serializeAllocationForFirestore(allocation) {
       row.forEach((bench, b) => {
         bench.forEach((s, i) => {
           if (!s) return;
-
+          
           rowStudents.push({
             roll: s.RollNumber || s.Roll || s["Roll Number"] || null,
 
             name: s.StudentName || s["StudentName"] || null,
-            year: s.year || null,
+            year: StudYears[s.year] || null,
             batch: s.Batch || s["Batch"] || null,
             isPublished: false,
             bench: b + 1,
@@ -437,7 +436,6 @@ router.post(
       const hallsCSV = req.files.halls[0].path;
 
       const studentCSVs = req.files.students.map((f) => f.path);
-      console.log(studentCSVs);
 
       const hallsData = await parseCSV(hallsCSV);
 
@@ -448,8 +446,11 @@ router.post(
         const year = path.parse(file).name;
         years.push(year);
         allStudents[year] = await parseCSV(file);
+        StudYears[year]=allStudents[year][0].year
       }
 
+       
+      
       const [yearA, yearB] = years;
       const totalStudents =
         allStudents[yearA].length + allStudents[yearB].length;
@@ -469,9 +470,7 @@ router.post(
         hallsData,
         evalResult.studentsPerBench,
       );
-      Object.entries(allocation).forEach(([h, r]) => {
-        printHall(h, r);
-      });
+       
 
       const duplicates = checkDuplicateStudents(allocation);
       let ExamName = req.body.examName;
