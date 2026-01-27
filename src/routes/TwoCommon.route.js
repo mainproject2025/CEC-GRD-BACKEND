@@ -308,7 +308,7 @@ function serializeAllocationForFirestore(allocation) {
             roll: s.RollNumber || s.Roll || s["Roll Number"] || null,
 
             name: s.Name || s["Student Name"] || null,
-
+            
             year: s.year || null,
             batch: s.Batch || s["Batch"] || null,
             isPublished:false,
@@ -330,7 +330,7 @@ function serializeAllocationForFirestore(allocation) {
 /* ================================
    FIRESTORE STORAGE
 ================================ */
-async function storeAllocationInFirestore(allocation, meta,name,sems,type) {
+async function storeAllocationInFirestore(allocation, meta,name,sems,type,examDate) {
   const ref = db.collection("examAllocations").doc();
 
   const safeAllocation = serializeAllocationForFirestore(allocation);
@@ -342,6 +342,7 @@ async function storeAllocationInFirestore(allocation, meta,name,sems,type) {
     name,
     sems,
     isElective:type==='Normal'?false:true,
+    examDate:examDate,
   });
 
   return ref.id;
@@ -398,6 +399,7 @@ router.post(
       const duplicates = checkDuplicateStudents(allocation);
       let ExamName=req.body.examName
       let year=req.body.years
+      let examDate=req.body.examDate
 
       const examId = await storeAllocationInFirestore(allocation, {
         yearA,
@@ -405,6 +407,7 @@ router.post(
         studentsPerBench: evalResult.studentsPerBench,
         totalStudents,
         duplicates,
+        examDate
          
       },req.body.examName, req.body.years,req.body.type)
         .then(() => {

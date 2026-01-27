@@ -300,6 +300,7 @@ router.post(
       let name=req.body.examName
       let sems=req.body.years
       let types=req.body.type
+      let examDate=req.body.examDate
       const doc = await db.collection("examAllocations").add({
         meta: {
           studentsPerBench,
@@ -310,7 +311,8 @@ router.post(
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         name,
         sems,
-        isElective:types==='Normal'?false:true
+        isElective:types==='Normal'?false:true,
+        examDate
       });
 
       res.json({
