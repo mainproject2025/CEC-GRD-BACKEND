@@ -15,7 +15,8 @@ const { admin, db } = require("../config/firebase");
 const router = express.Router();
 const upload = multer({ dest: "uploads/" });
 // router.use(express.json());
-
+let StudYears={}
+let NewStudYears={}
 /* ================================
    CSV PARSER
 ================================ */
@@ -375,7 +376,7 @@ function serializeAllocationForFirestore(allocation) {
           rowStudents.push({
             roll: s.RollNumber || s.Roll || s["Roll Number"] || null,
 
-            name: s.Name || s["Student Name"] || null,
+            name: s.StudentName || s["StudentName"] || null,
             year: s.year || null,
             batch: s.Batch || s["Batch"] || null,
             isPublished: false,
