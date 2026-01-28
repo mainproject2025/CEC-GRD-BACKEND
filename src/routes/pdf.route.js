@@ -233,6 +233,7 @@ function generateSummaryHTML(allocation) {
         <th>From</th>
         <th>To</th>
         <th>Count</th>
+        <th>Absentees</th>
       </tr>`;
 
     Object.entries(map).forEach(([year, batches]) =>
