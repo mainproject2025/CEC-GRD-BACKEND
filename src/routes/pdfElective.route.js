@@ -250,6 +250,7 @@ function generateSummaryHTML(allocation) {
             <td>${year}</td>
             <td>${batch}</td>
             <td>${map[year][batch].sort().join(", ")}</td>
+            <td></td>
           </tr>
           `;
           }),
