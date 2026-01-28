@@ -247,6 +247,7 @@ function generateSummaryHTML(allocation) {
           <td>${rolls[0]}</td>
           <td>${rolls[rolls.length - 1]}</td>
           <td>${rolls.length}</td>
+          <td></td>
         </tr>
       `;
       }),
