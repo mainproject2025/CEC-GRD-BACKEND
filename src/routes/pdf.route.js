@@ -137,16 +137,16 @@ function generateHallHTML(allocation) {
     );
 
 
-      html += "<tr><td></td>";
-      rows[0].forEach((bench,i) => {
-          html += `<th>${String.fromCharCode(65+i)}</th>`;
-      });
-      html += "</tr>";
+      // html += "<tr><td></td>";
+      // rows[0].forEach((bench,i) => {
+      //     html += `<th>${String.fromCharCode(65+i)}</th>`;
+      // });
+      // html += "</tr>";
  
 
     rows.forEach((row,i) => {
       html += "<tr>";
-      html += `<th>${i+1}</th>`;
+      // html += `<th>${i+1}</th>`;
       row.forEach((bench) => {
         for (let i = 0; i < maxSeatsPerBench; i++) {
           const s = bench[i];
