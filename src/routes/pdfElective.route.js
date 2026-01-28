@@ -235,6 +235,7 @@ function generateSummaryHTML(allocation) {
         <th>Year</th>
         <th>Batch</th>
         <th>Roll Numbers</th>
+        <th>Absentees</th>
       </tr>
     `;
 
