@@ -133,11 +133,11 @@ function generateHallHTML(allocation) {
       ...rows.flatMap((row) => row.map((bench) => bench.length)),
     );
 
-    html += "<tr><td></td>";
-    rows[0].forEach((bench, i) => {
-      html += `<th>${String.fromCharCode(65 + i)}</th>`;
-    });
-    html += "</tr>";
+    // html += "<tr><td></td>";
+    // rows[0].forEach((bench, i) => {
+    //   html += `<th>${String.fromCharCode(65 + i)}</th>`;
+    // });
+    // html += "</tr>";
 
     rows.forEach((row) => {
       html += "<tr>";
