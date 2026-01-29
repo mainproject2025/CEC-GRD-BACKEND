@@ -85,41 +85,66 @@ function allocateStudents(
     const hallName = hall.HallName;
     const hallMatrix = [];
 
+    // Check if students are still available
+    let studentsLeft = iA < A.length || iB < B.length;
+
+    // If no students left → empty hall
+    if (!studentsLeft) {
+      allocation[hallName] = [];
+      return;
+    }
+
+    // Pattern per hall
+    const startWithA = hallIndex % 2 === 0;
+
     for (let r = 0; r < rows; r++) {
-      const rowOffset = r % 2 === 0 ? 0 : 1;
       const row = [];
 
       for (let b = 0; b < benchesPerRow; b++) {
         const bench = [];
 
-        if (studentsPerBench === 2) {
-          const order = rowOffset === 0 ? ["A", "B"] : ["B", "A"];
+        // Stop filling if no students
+        if (iA >= A.length && iB >= B.length) break;
 
-          order.forEach((o) => {
+        if (studentsPerBench === 2) {
+
+          const order = startWithA
+            ? ["A", "B"]
+            : ["B", "A"];
+
+          for (let o of order) {
+
+            if (iA >= A.length && iB >= B.length) break;
+
             let student = null;
 
             if (o === "A" && iA < A.length)
               student = { ...A[iA++], year: yearA };
 
-            if (o === "B" && iB < B.length)
+            else if (o === "B" && iB < B.length)
               student = { ...B[iB++], year: yearB };
 
-            if (!student && iA < A.length)
+            else if (iA < A.length)
               student = { ...A[iA++], year: yearA };
 
-            if (!student && iB < B.length)
+            else if (iB < B.length)
               student = { ...B[iB++], year: yearB };
 
             if (student) bench.push(student);
-          });
+          }
+
         } else {
+
           for (let s = 0; s < 3; s++) {
+
+            if (iA >= A.length && iB >= B.length) break;
+
             const seatIndex = b * 3 + s;
 
             const pick =
-              (seatIndex + rowOffset + hallIndex) % 2 === 0
-                ? "A"
-                : "B";
+              seatIndex % 2 === 0
+                ? (startWithA ? "A" : "B")
+                : (startWithA ? "B" : "A");
 
             let student = null;
 
@@ -139,10 +164,19 @@ function allocateStudents(
           }
         }
 
-        row.push(bench);
+        // Only push bench if filled with someone
+        if (bench.length > 0) {
+          row.push(bench);
+        }
       }
 
-      hallMatrix.push(row);
+      // Only push row if not empty
+      if (row.length > 0) {
+        hallMatrix.push(row);
+      }
+
+      // Stop hall if no students
+      if (iA >= A.length && iB >= B.length) break;
     }
 
     allocation[hallName] = hallMatrix;
@@ -150,6 +184,8 @@ function allocateStudents(
 
   return allocation;
 }
+
+
 
 /* ================================
    OPTIMIZE
