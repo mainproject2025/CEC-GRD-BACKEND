@@ -14,8 +14,10 @@ const { admin, db } = require("../config/firebase");
 ================================ */
 const router = express.Router();
 const upload = multer({ dest: "uploads/" });
-// router.use(express.json());
-let StudYears={}
+
+let StudYears = {};
+let CL_STUDENTS = [];
+
 /* ================================
    CSV PARSER
 ================================ */
@@ -30,7 +32,7 @@ const parseCSV = (filePath) =>
   });
 
 /* ================================
-   BENCH CAPACITY EVALUATION
+   BENCH CAPACITY
 ================================ */
 function evaluateBenchCapacity(hallsData, totalStudents) {
   let totalBenches = 0;
@@ -45,17 +47,8 @@ function evaluateBenchCapacity(hallsData, totalStudents) {
   if (3 * totalBenches >= totalStudents)
     return { studentsPerBench: 3, totalBenches };
 
-  throw new Error("❌ Insufficient bench capacity");
+  throw new Error("Insufficient bench capacity");
 }
-
-/* ================================
-   PATTERN (ONLY FOR 3 PER BENCH)
-================================ */
-// function getPatternForHall(hallIndex) {
-//   return hallIndex % 2 === 0
-//     ? ["A", "B", "A", "A", "B", "A"]
-//     : ["B", "A", "B", "B", "A", "B"];
-// }
 
 /* ================================
    SHUFFLE
@@ -75,9 +68,8 @@ function allocateStudents(
   yearA,
   yearB,
   hallsData,
-  studentsPerBench
+  studentsPerBench,
 ) {
-
   const A = [...allStudents[yearA]];
   const B = [...allStudents[yearB]];
 
@@ -87,36 +79,23 @@ function allocateStudents(
   const allocation = {};
 
   hallsData.forEach((hall, hallIndex) => {
-
     const rows = Number(hall.Rows);
-
-    // Number of benches in one row
     const benchesPerRow = Math.floor(Number(hall.Columns) / 3);
 
     const hallName = hall.HallName;
-
     const hallMatrix = [];
 
     for (let r = 0; r < rows; r++) {
-
-      // Flip every row
-      // Row 0 → ABAB
-      // Row 1 → BABA
       const rowOffset = r % 2 === 0 ? 0 : 1;
-
       const row = [];
 
       for (let b = 0; b < benchesPerRow; b++) {
-
         const bench = [];
 
         if (studentsPerBench === 2) {
-
-          // 2 seats: A B or B A
           const order = rowOffset === 0 ? ["A", "B"] : ["B", "A"];
 
-          order.forEach(o => {
-
+          order.forEach((o) => {
             let student = null;
 
             if (o === "A" && iA < A.length)
@@ -133,15 +112,10 @@ function allocateStudents(
 
             if (student) bench.push(student);
           });
-
         } else {
-
-          // 3 seats: AB A / BA B
           for (let s = 0; s < 3; s++) {
-
             const seatIndex = b * 3 + s;
 
-            // Decide A or B
             const pick =
               (seatIndex + rowOffset + hallIndex) % 2 === 0
                 ? "A"
@@ -177,42 +151,8 @@ function allocateStudents(
   return allocation;
 }
 
-
 /* ================================
-   RANDOMIZATION
-================================ */
-function randomizeHallYearWise(allocation, yearA, yearB) {
-  for (const hallName in allocation) {
-    const rows = allocation[hallName];
-    const posA = [],
-      stuA = [];
-    const posB = [],
-      stuB = [];
-
-    rows.forEach((row, r) =>
-      row.forEach((bench, b) =>
-        bench.forEach((student, s) => {
-          if (student.year === yearA) {
-            posA.push([r, b, s]);
-            stuA.push(student);
-          } else if (student.year === yearB) {
-            posB.push([r, b, s]);
-            stuB.push(student);
-          }
-        }),
-      ),
-    );
-
-    shuffleArray(stuA);
-    shuffleArray(stuB);
-
-    posA.forEach(([r, b, s], i) => (rows[r][b][s] = stuA[i]));
-    posB.forEach(([r, b, s], i) => (rows[r][b][s] = stuB[i]));
-  }
-}
-
-/* ================================
-   OPTIMIZATION STAGE
+   OPTIMIZE
 ================================ */
 function analyzeHall(hallMatrix) {
   let students = 0;
@@ -230,9 +170,11 @@ function analyzeHall(hallMatrix) {
 
 function repackHallToTwoPerBench(hallMatrix) {
   const students = [];
+
   hallMatrix.forEach((r) =>
     r.forEach((b) => b.forEach((s) => students.push(s))),
   );
+
   let idx = 0;
 
   hallMatrix.forEach((row) =>
@@ -244,31 +186,8 @@ function repackHallToTwoPerBench(hallMatrix) {
   );
 }
 
-function printHall(hallName, rows) {
-  console.log("\nHall:", hallName);
-
-  rows.forEach((row, r) => {
-    const line = [];
-
-    row.forEach((bench) => {
-      bench.forEach((s) => {
-        if (!s) return;
-
-        line.push(`${s.year}-${s.RollNumber || s.Roll}`);
-      });
-    });
-
-    console.log(`Row ${r + 1}:`, line.join(" | "));
-  });
-
-  console.log("----------------------------");
-}
-
 function optimizeHallUtilization(allocation, hallsData, studentsPerBench) {
-  const hallNames = Object.keys(allocation);
-
-  // Case 1: partial halls
-  hallNames.forEach((hallName) => {
+  for (const hallName in allocation) {
     const hallMatrix = allocation[hallName];
     const hallInfo = hallsData.find((h) => h.HallName === hallName);
 
@@ -284,85 +203,94 @@ function optimizeHallUtilization(allocation, hallsData, studentsPerBench) {
     ) {
       repackHallToTwoPerBench(hallMatrix);
     }
-  });
-
-  // Case 2: rebalance halls
-  for (let i = 0; i < hallNames.length; i++) {
-    for (let j = i + 1; j < hallNames.length; j++) {
-      const h1 = hallsData.find((h) => h.HallName === hallNames[i]);
-      const h2 = hallsData.find((h) => h.HallName === hallNames[j]);
-
-      const cap1 = Number(h1.Rows) * Math.floor(Number(h1.Columns) / 3);
-      const cap2 = Number(h2.Rows) * Math.floor(Number(h2.Columns) / 3);
-
-      const a = analyzeHall(allocation[hallNames[i]]);
-      const b = analyzeHall(allocation[hallNames[j]]);
-
-      if (a.students + b.students <= 2 * (cap1 + cap2)) {
-        const combined = [];
-
-        [hallNames[i], hallNames[j]].forEach((h) =>
-          allocation[h].forEach((r) =>
-            r.forEach((b) => b.forEach((s) => combined.push(s))),
-          ),
-        );
-
-        let idx = 0;
-        [hallNames[i], hallNames[j]].forEach((h) =>
-          allocation[h].forEach((row) =>
-            row.forEach((bench) => {
-              bench.length = 0;
-              if (idx < combined.length) bench.push(combined[idx++]);
-              if (idx < combined.length) bench.push(combined[idx++]);
-            }),
-          ),
-        );
-      }
-    }
   }
 }
 
 /* ================================
-   DUPLICATE CHECK
+   CL INJECTION
 ================================ */
-function checkDuplicateStudents(allocation) {
-  const seen = new Map();
-  const duplicates = [];
+function injectCLStudents(allocation, clStudents) {
+  const removed = [];
+  let clIndex = 0;
 
-  for (const [hall, rows] of Object.entries(allocation)) {
-    rows.forEach((row, r) =>
-      row.forEach((bench, b) =>
-        bench.forEach((student) => {
-          const roll =
-            student.RollNumber || student.Roll || student["Roll Number"];
-          if (!roll) return;
+  for (const hallName of Object.keys(allocation)) {
+    if (clIndex >= clStudents.length) break;
 
-          if (seen.has(roll)) {
-            duplicates.push({
-              roll,
-              first: seen.get(roll),
-              duplicateAt: { hall, row: r + 1, bench: b + 1 },
-            });
-          } else {
-            seen.set(roll, { hall, row: r + 1, bench: b + 1 });
+    const hall = allocation[hallName];
+    const yearCount = {};
+
+    hall.forEach((row) =>
+      row.forEach((bench) =>
+        bench.forEach((s) => {
+          if (!s) return;
+
+          yearCount[s.year] =
+            (yearCount[s.year] || 0) + 1;
+        }),
+      ),
+    );
+
+    const targetYear = Object.entries(yearCount)
+      .sort((a, b) => b[1] - a[1])[0]?.[0];
+
+    if (!targetYear) continue;
+
+    hall.forEach((row) =>
+      row.forEach((bench) =>
+        bench.forEach((s, i) => {
+          if (
+            s &&
+            s.year === targetYear &&
+            clIndex < clStudents.length
+          ) {
+            removed.push(s);
+            bench[i] = clStudents[clIndex++];
           }
         }),
       ),
     );
   }
-  return duplicates;
+
+  return {
+    removedStudents: removed,
+    remainingCL: clStudents.slice(clIndex),
+  };
 }
-///////////////////////////
+
+function reallocateLeftovers(allocation, students) {
+  let idx = 0;
+
+  for (const hallName of Object.keys(allocation)) {
+    if (idx >= students.length) break;
+
+    const hall = allocation[hallName];
+
+    hall.forEach((row) =>
+      row.forEach((bench) => {
+        if (idx >= students.length) return;
+
+        if (bench.length < 2) {
+          const prev = bench[bench.length - 1];
+
+          if (!prev || prev.year !== students[idx].year) {
+            bench.push(students[idx++]);
+          }
+        }
+      }),
+    );
+  }
+}
+
+/* ================================
+   SERIALIZE
+================================ */
 function serializeAllocationForFirestore(allocation) {
   const result = {};
 
   for (const [hall, rows] of Object.entries(allocation)) {
-    const totalRows = rows.length;
-    const totalColumns = rows[0]?.length || 0;
-
     const hallData = {
-      rows: totalRows,
-      columns: totalColumns,
+      rows: rows.length,
+      columns: rows[0]?.length || 0,
     };
 
     rows.forEach((row, r) => {
@@ -371,13 +299,16 @@ function serializeAllocationForFirestore(allocation) {
       row.forEach((bench, b) => {
         bench.forEach((s, i) => {
           if (!s) return;
-          
-          rowStudents.push({
-            roll: s.RollNumber || s.Roll || s["Roll Number"] || null,
 
-            name: s.StudentName || s["StudentName"] || null,
+          rowStudents.push({
+            roll:
+              s.RollNumber ||
+              s.Roll ||
+              s["Roll Number"] ||
+              null,
+            name: s.StudentName || null,
             year: StudYears[s.year] || null,
-            batch: s.Batch || s["Batch"] || null,
+            batch: s.Batch || null,
             isPublished: false,
             bench: b + 1,
             seat: i + 1,
@@ -395,7 +326,7 @@ function serializeAllocationForFirestore(allocation) {
 }
 
 /* ================================
-   FIRESTORE STORAGE
+   FIRESTORE
 ================================ */
 async function storeAllocationInFirestore(
   allocation,
@@ -416,14 +347,14 @@ async function storeAllocationInFirestore(
     name,
     sems,
     isElective: type === "Normal" ? false : true,
-    examDate: examDate,
+    examDate,
   });
 
   return ref.id;
 }
 
 /* ================================
-   API ROUTE
+   ROUTE
 ================================ */
 router.post(
   "/",
@@ -434,7 +365,6 @@ router.post(
   async (req, res) => {
     try {
       const hallsCSV = req.files.halls[0].path;
-
       const studentCSVs = req.files.students.map((f) => f.path);
 
       const hallsData = await parseCSV(hallsCSV);
@@ -442,20 +372,44 @@ router.post(
       const allStudents = {};
       const years = [];
 
+      CL_STUDENTS = [];
+
       for (const file of studentCSVs) {
         const year = path.parse(file).name;
         years.push(year);
-        allStudents[year] = await parseCSV(file);
-        StudYears[year]=allStudents[year][0].year
+
+        const data = await parseCSV(file);
+
+        const normal = [];
+        const cl = [];
+
+        data.forEach((s) => {
+          const roll =
+            s.RollNumber || s.Roll || s["Roll Number"] || "";
+
+          if (roll.includes("CL")) {
+            cl.push({ ...s, year });
+          } else {
+            normal.push(s);
+          }
+        });
+
+        allStudents[year] = normal;
+        CL_STUDENTS.push(...cl);
+
+        StudYears[year] = data[0]?.year || null;
       }
 
-       
-      
       const [yearA, yearB] = years;
-      const totalStudents =
-        allStudents[yearA].length + allStudents[yearB].length;
 
-      const evalResult = evaluateBenchCapacity(hallsData, totalStudents);
+      const totalStudents =
+        allStudents[yearA].length +
+        allStudents[yearB].length;
+
+      const evalResult = evaluateBenchCapacity(
+        hallsData,
+        totalStudents,
+      );
 
       let allocation = allocateStudents(
         allStudents,
@@ -470,14 +424,18 @@ router.post(
         hallsData,
         evalResult.studentsPerBench,
       );
-       
 
-      const duplicates = checkDuplicateStudents(allocation);
-      let ExamName = req.body.examName;
-      let year = req.body.years;
-      let examDate = req.body.examDate;
-      console.log(req.body);
-      
+      // CL handling
+      const { removedStudents, remainingCL } =
+        injectCLStudents(allocation, CL_STUDENTS);
+
+      const leftovers = [
+        ...removedStudents,
+        ...remainingCL,
+      ];
+
+      reallocateLeftovers(allocation, leftovers);
+
       const examId = await storeAllocationInFirestore(
         allocation,
         {
@@ -485,25 +443,22 @@ router.post(
           yearB,
           studentsPerBench: evalResult.studentsPerBench,
           totalStudents,
-          duplicates,
-          
         },
         req.body.examName,
         req.body.years,
         req.body.type,
-        req.body.examDate
-      )
-        .then(() => {
-          console.log("fdsfdasf");
-        })
-        .catch((e) => {
-          console.log(e);
-        });
+        req.body.examDate,
+      );
 
-      res.json({ success: true, examId, duplicates });
+      // Cleanup
+      fs.unlinkSync(hallsCSV);
+      studentCSVs.forEach((f) => fs.unlinkSync(f));
+
+      CL_STUDENTS = [];
+
+      res.json({ success: true, examId });
     } catch (err) {
-      console.log("error");
-
+      console.error(err);
       res.status(500).json({ error: err.message });
     }
   },
