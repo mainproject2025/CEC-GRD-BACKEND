@@ -6,17 +6,16 @@ const path = require("path");
 
 const router = express.Router();
 const upload = multer({ dest: "uploads/" });
-const { admin, db } = require("../config/firebase");
-const { log } = require("console");
 
-let StudYears={}
-let NewStudYears={}
+const { admin, db } = require("../config/firebase");
+
 /* ================================
    CSV PARSER
 ================================ */
 const parseCSV = (filePath) =>
   new Promise((resolve, reject) => {
     const results = [];
+
     fs.createReadStream(filePath)
       .pipe(csv())
       .on("data", (d) => results.push(d))
@@ -25,276 +24,229 @@ const parseCSV = (filePath) =>
   });
 
 /* ================================
-   GROUP BY SUBJECT
+   GROUP BY YEAR + SUBJECT
 ================================ */
-function groupBySubject(students, key = "Subject") {
-  const map = {};
+function groupByYearAndSubject(students) {
+  const result = {
+    A: {},
+    B: {},
+  };
+
   students.forEach((s) => {
-    const subject = s[key];
-    if (!subject) return;
-    if (!map[subject]) map[subject] = [];
-    map[subject].push(s);
-  });
-  return map;
-}
+    const year = s.year;
+    const subject = s.subject;
 
-/* ================================
-   ROUND ROBIN SUBJECT MIX
-================================ */
-function interleaveSubjects(subjectMap) {
-  const subjects = Object.keys(subjectMap);
-  const ptr = subjects.map(() => 0);
-  const out = [];
-  let added = true;
-
-  while (added) {
-    added = false;
-    subjects.forEach((s, i) => {
-      if (ptr[i] < subjectMap[s].length) {
-        out.push({ ...subjectMap[s][ptr[i]++], subject: s });
-        added = true;
-      }
-    });
-  }
-  return out;
-}
-
-/* ================================
-   BENCH CAPACITY
-================================ */
-function evaluateBenchCapacity(hallsData, totalStudents) {
-  let benches = 0;
-  hallsData.forEach(
-    (h) => (benches += Number(h.Rows) * Math.floor(Number(h.Columns) / 3)),
-  );
-
-  if (2 * benches >= totalStudents) return { studentsPerBench: 2 };
-  if (3 * benches >= totalStudents) return { studentsPerBench: 3 };
-  throw new Error("❌ Insufficient bench capacity");
-}
-
-/* ================================
-   SHUFFLE
-================================ */
-function shuffle(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-}
-
-/* ================================
-   SUBJECT SAFE PICKER
-================================ */
-function pickAvoidingSameSubject(pool, usedSubjects) {
-  for (let i = 0; i < pool.length; i++) {
-    if (!usedSubjects.has(pool[i].subject)) {
-      return pool.splice(i, 1)[0];
+    if (!result[year][subject]) {
+      result[year][subject] = [];
     }
-  }
-  return null;
+
+    result[year][subject].push(s);
+  });
+
+  return result;
 }
 
 /* ================================
-   DOMINANT SUBJECT PER HALL
+   BUILD SUBJECT ORDERED LIST
 ================================ */
-function assignDominantSubjects(hallsData, subjectMap) {
-  const hallSub = {};
-  hallsData.forEach((h) => {
-    const sorted = Object.entries(subjectMap).sort(
-      (a, b) => b[1].length - a[1].length,
-    );
-    hallSub[h.HallName] = sorted[0]?.[0];
+function buildOrderedList(grouped) {
+  const subjects = new Set([
+    ...Object.keys(grouped.A),
+    ...Object.keys(grouped.B),
+  ]);
+
+  const ordered = [];
+
+  subjects.forEach((sub) => {
+    if (grouped.A[sub]) ordered.push(...grouped.A[sub]);
+    if (grouped.B[sub]) ordered.push(...grouped.B[sub]);
   });
-  return hallSub;
+
+  return ordered;
 }
 
 /* ================================
-   SUBJECT-AWARE ALLOCATION
+   COLUMN-WISE AB ALLOCATION
 ================================ */
-function allocateStudentsSubjectWise(students, hallsData, spb) {
-  /* ---------------------------
-     GROUP BY SUBJECT + YEAR
-  ----------------------------*/
+function allocateColumnWiseAB(students, hallsData) {
 
-  const subjectYearMap = {};
+  const A = students.filter((s) => s.year === "A");
+  const B = students.filter((s) => s.year === "B");
 
-  students.forEach((s) => {
-    if (!subjectYearMap[s.subject]) subjectYearMap[s.subject] = {};
-
-    if (!subjectYearMap[s.subject][s.year])
-      subjectYearMap[s.subject][s.year] = [];
-
-    subjectYearMap[s.subject][s.year].push(s);
-  });
-
-  /* ---------------------------
-     SORT SUBJECTS BY SIZE
-  ----------------------------*/
-
-  const subjects = Object.keys(subjectYearMap).sort((a, b) => {
-    const count = (obj) => Object.values(obj).reduce((s, x) => s + x.length, 0);
-
-    return count(subjectYearMap[b]) - count(subjectYearMap[a]);
-  });
+  let a = 0;
+  let b = 0;
 
   const allocation = {};
 
-  /* ---------------------------
-     MAIN LOOP
-  ----------------------------*/
+  // Pattern per row (for 3 benches)
+  const rowPattern = [
+    ["A", "B", "A"], // Bench 1
+    ["B", "A", "B"], // Bench 2
+    ["A", "B", "A"], // Bench 3
+  ];
 
-  hallsData.forEach((hall, hallIndex) => {
+  let oneYearFinished = false;
+
+  hallsData.forEach((hall) => {
+
     const rows = Number(hall.Rows);
     const benches = Math.floor(Number(hall.Columns) / 3);
 
-    const hallMatrix = [];
+    const matrix = Array.from({ length: rows }, () =>
+      Array.from({ length: benches }, () => [])
+    );
 
-    // Pick dominant subject for this hall
-    const dominantSubject = subjects[hallIndex % subjects.length];
+    // Column-wise filling
+    for (let col = 0; col < benches; col++) {
 
-    const pools = subjectYearMap[dominantSubject] || {};
+      for (let row = 0; row < rows; row++) {
 
-    for (let r = 0; r < rows; r++) {
-      const rowOffset = r % 2 === 0 ? 0 : 1;
-
-      const row = [];
-
-      for (let b = 0; b < benches; b++) {
         const bench = [];
 
-        for (let s = 0; s < spb; s++) {
-          const seatIndex = b * spb + s;
+        const hasA = a < A.length;
+        const hasB = b < B.length;
 
-          const preferYear =
-            (seatIndex + rowOffset + hallIndex) % 2 === 0 ? "A" : "B";
+        /* ===============================
+           CASE 1: BOTH YEARS AVAILABLE
+           → USE ROW PATTERN (3 SEATS)
+        =============================== */
 
-          let student = null;
+        if (hasA && hasB && !oneYearFinished) {
 
-          /* ---------------------------
-             TRY DOMINANT SUBJECT FIRST
-          ----------------------------*/
+          const pattern =
+            rowPattern[col % rowPattern.length];
 
-          if (pools[preferYear]?.length) {
-            student = pools[preferYear].shift();
-          }
+          for (const p of pattern) {
 
-          /* ---------------------------
-             FALLBACK SEARCH
-          ----------------------------*/
+            if (p === "A" && a < A.length) {
+              bench.push(A[a++]);
+            }
 
-          if (!student) {
-            search: for (const [sub, years] of Object.entries(subjectYearMap)) {
-              for (const [yr, list] of Object.entries(years)) {
-                if (!list.length) continue;
+            else if (p === "B" && b < B.length) {
+              bench.push(B[b++]);
+            }
 
-                student = list.shift();
-                break search;
-              }
+            // Safety fallback
+            else if (a < A.length) {
+              bench.push(A[a++]);
+            }
+
+            else if (b < B.length) {
+              bench.push(B[b++]);
             }
           }
 
-          /* ---------------------------
-             SUBJECT CONFLICT CHECK
-          ----------------------------*/
-
-          if (student && bench.length) {
-            const left = bench[bench.length - 1];
-
-            if (
-              left.subject === student.subject &&
-              left.year !== student.year
-            ) {
-              // Put back and retry
-              subjectYearMap[student.subject][student.year].unshift(student);
-
-              student = null;
-            }
+          // If one year ended during fill
+          if (a >= A.length || b >= B.length) {
+            oneYearFinished = true;
           }
-
-          if (student) bench.push(student);
         }
 
-        row.push(bench);
-      }
+        /* ===============================
+           CASE 2: ONE YEAR FINISHED
+           → USE 2 PER BENCH
+        =============================== */
 
-      hallMatrix.push(row);
+        else {
+
+          oneYearFinished = true;
+
+          // Fill only with remaining students
+
+          if (a < A.length) bench.push(A[a++]);
+          if (a < A.length) bench.push(A[a++]);
+
+          if (b < B.length) bench.push(B[b++]);
+          if (b < B.length) bench.push(B[b++]);
+        }
+
+        // Place bench if it has students
+        if (bench.length >= 2) {
+          matrix[row][col] = bench;
+        }
+      }
     }
 
-    allocation[hall.HallName] = hallMatrix;
+    allocation[hall.HallName] = matrix;
   });
+
+  /* ===============================
+     PRINT REMAINING STUDENTS
+  =============================== */
+
+  const remaining = [];
+
+  while (a < A.length) remaining.push(A[a++]);
+  while (b < B.length) remaining.push(B[b++]);
+
+  if (remaining.length) {
+
+    console.log("\n⚠️ REMAINING STUDENTS\n");
+
+    remaining.forEach((s, i) => {
+      console.log(
+        `${i + 1}. Roll: ${s.Roll || s.RollNumber || "?"} | ` +
+        `Year: ${s.year} | Subject: ${s.subject}`
+      );
+    });
+
+    console.log("\n--------------------------\n");
+
+  } else {
+
+    console.log("\n✅ All students placed.\n");
+  }
 
   return allocation;
 }
 
+
+
+
+
 /* ================================
-   HALL ANALYSIS
+   PRINT ALLOCATION
 ================================ */
-function analyzeHall(hall) {
-  let students = 0,
-    benchesUsed = 0;
-  hall.forEach((r) =>
-    r.forEach((b) => {
-      if (b.length) benchesUsed++;
-      students += b.length;
-    }),
-  );
-  return { students, benchesUsed };
+function printAllocation(allocation) {
+  console.log("\n========== SEATING ARRANGEMENT ==========\n");
+
+  for (const [hall, rows] of Object.entries(allocation)) {
+    console.log(`🏫 Hall: ${hall}\n`);
+
+    rows.forEach((row, r) => {
+      let line = `Row ${r + 1}: `;
+
+      row.forEach((bench) => {
+        if (!bench.length) {
+          line += "[ --- ] ";
+          return;
+        }
+
+        const seats = bench.map(
+          (s) =>
+            `${s.Roll || s.RollNumber || "?"}-${s.year}`
+        );
+
+        line += `[ ${seats.join(" | ")} ] `;
+      });
+
+      console.log(line);
+    });
+
+    console.log("\n---------------------------------\n");
+  }
 }
 
 /* ================================
-   REPACK TO 2 PER BENCH
-================================ */
-function repackToTwo(hall) {
-  const list = [];
-  hall.forEach((r) => r.forEach((b) => b.forEach((s) => list.push(s))));
-  let i = 0;
-  hall.forEach((r) =>
-    r.forEach((b) => {
-      b.length = 0;
-      if (i < list.length) b.push(list[i++]);
-      if (i < list.length) b.push(list[i++]);
-    }),
-  );
-}
-
-/* ================================
-   OPTIMIZATION
-================================ */
-function optimizeHallUtilization(allocation, hallsData, spb) {
-  const halls = Object.keys(allocation);
-
-  halls.forEach((name) => {
-    const hall = allocation[name];
-    const info = hallsData.find((h) => h.HallName === name);
-    const totalBenches =
-      Number(info.Rows) * Math.floor(Number(info.Columns) / 3);
-
-    const { students, benchesUsed } = analyzeHall(hall);
-
-    if (
-      spb === 3 &&
-      benchesUsed < totalBenches &&
-      students <= totalBenches * 2
-    ) {
-      repackToTwo(hall);
-    }
-  });
-}
-
-/* ================================
-   FIRESTORE SERIALIZER (SAFE)
+   FIRESTORE SERIALIZER
 ================================ */
 function serializeAllocationForFirestore(allocation) {
   const result = {};
 
   for (const [hall, rows] of Object.entries(allocation)) {
-    const totalRows = rows.length;
-    const totalColumns = rows[0]?.length || 0;
-
     const hallData = {
-      rows: totalRows,
-      columns: totalColumns,
+      rows: rows.length,
+      columns: rows[0]?.length || 0,
     };
 
     rows.forEach((row, r) => {
@@ -304,17 +256,26 @@ function serializeAllocationForFirestore(allocation) {
         bench.forEach((s, i) => {
           if (!s) return;
 
-      
-          
           rowStudents.push({
-            // 🔥 ONLY PRIMITIVES (Firestore safe)
-            roll: s.RollNumber || s.Roll || s["Roll Number"] || null,
+            roll:
+              s.RollNumber ||
+              s.Roll ||
+              s["Roll Number"] ||
+              null,
 
-            name: s.StudentName || s["StudentName"] || null,
+            name:
+              s.StudentName ||
+              s.Name ||
+              null,
 
-            year: NewStudYears[s.year] || null,
-            batch: s.Batch || s["Batch"] || null,
+            subject: s.subject || null,
+
+            year: s.year || null,
+
+            batch: s.Batch || null,
+
             isPublished: false,
+
             bench: b + 1,
             seat: i + 1,
           });
@@ -331,96 +292,141 @@ function serializeAllocationForFirestore(allocation) {
 }
 
 /* ================================
-   🚀 EXPRESS ROUTE
+   ROUTE
 ================================ */
 router.post(
   "/",
   upload.fields([
     { name: "halls", maxCount: 1 },
-    { name: "students", maxCount: 10 },
+    { name: "students", maxCount: 2 },
   ]),
+
   async (req, res) => {
     try {
+      /* -----------------------------
+         READ CSV FILES
+      ------------------------------ */
+
       const hallsCSV = req.files.halls[0].path;
-      const studentCSVs = req.files.students.map((f) => f.path);
-    
-      
+
+      const studentCSVs =
+        req.files.students.map((f) => f.path);
+
       const hallsData = await parseCSV(hallsCSV);
+
       const yearMap = {};
-      for (const f of studentCSVs) {
-  
-        const year = path.parse(f).name;
-        const students = await parseCSV(f);
-        StudYears[year]=students[0].year
-        
-        yearMap[year] = interleaveSubjects(groupBySubject(students));
-         
-        
-      }
 
-      const years = Object.keys(yearMap);
-      
-      console.log((Object.keys(StudYears)[0]))
-      
-      const merged = Object.entries(yearMap).flatMap(([year, list], i) =>{
-        if (i===0){
-          NewStudYears["A"]=StudYears[(Object.keys(StudYears)[0])]
-        }else{
-          NewStudYears["B"]=StudYears[(Object.keys(StudYears)[1])]
-        }
-        return list.map((s) => ({
+      /* -----------------------------
+         READ YEAR FILES
+      ------------------------------ */
+
+      for (let i = 0; i < studentCSVs.length; i++) {
+        const file = studentCSVs[i];
+
+        const year = i === 0 ? "A" : "B";
+
+        const students = await parseCSV(file);
+
+        yearMap[year] = students.map((s) => ({
           ...s,
-          year: i === 0 ? "A" : "B",
+          year,
+          subject: s.Subject || s.subject,
         }));
-
       }
-      );
 
-      
-      
-       
-      
+      /* -----------------------------
+         MERGE STUDENTS
+      ------------------------------ */
 
-      const { studentsPerBench } = evaluateBenchCapacity(
-        hallsData,
-        merged.length,
-      );
+      const merged = [
+        ...(yearMap.A || []),
+        ...(yearMap.B || []),
+      ];
 
-      let allocation = allocateStudentsSubjectWise(
-        merged,
-        hallsData,
-        studentsPerBench,
-      );
+      /* -----------------------------
+         GROUP BY YEAR + SUBJECT
+      ------------------------------ */
 
-      serializeAllocationForFirestore(allocation)
+      const grouped =
+        groupByYearAndSubject(merged);
 
-      optimizeHallUtilization(allocation, hallsData, studentsPerBench);
-      let name = req.body.examName;
-      let sems = req.body.years;
-      let types = req.body.type;
-      let examDate = req.body.examDate;
-      const doc = await db.collection("examAllocations").add({
-        meta: {
-          studentsPerBench,
-          totalStudents: merged.length,
-        },
-        halls: serializeAllocationForFirestore(allocation),
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        name,
-        sems,
-        isElective: types === "Normal" ? false : true,
-        examDate,
+      console.log("\n===== GROUPED OBJECT =====\n");
+      console.dir(grouped, { depth: null });
+
+      /* -----------------------------
+         BUILD ORDERED LIST
+      ------------------------------ */
+
+      const ordered =
+        buildOrderedList(grouped);
+
+      console.log("\n===== ORDERED LIST =====\n");
+
+      ordered.forEach((s, i) => {
+        console.log(
+          `${i + 1}. ${s.Roll || s.RollNumber} | ${s.subject} | ${s.year}`
+        );
       });
+
+      /* -----------------------------
+         ALLOCATE SEATS
+      ------------------------------ */
+
+      const allocation =
+        allocateColumnWiseAB(
+          ordered,
+          hallsData
+        );
+
+      // Print final seating
+      printAllocation(allocation);
+
+      /* -----------------------------
+         SAVE TO FIRESTORE
+      ------------------------------ */
+
+      const name = req.body.examName;
+      const sems = req.body.years;
+      const types = req.body.type;
+      const examDate = req.body.examDate;
+
+      await db
+        .collection("examAllocations")
+        .add({
+          meta: {
+            totalStudents: merged.length,
+            method: "AB Column-wise Subject Grouped",
+          },
+
+          halls:
+            serializeAllocationForFirestore(
+              allocation
+            ),
+
+          createdAt:
+            admin.firestore.FieldValue.serverTimestamp(),
+
+          name,
+          sems,
+
+          isElective: types !== "Normal",
+
+          examDate,
+        });
 
       res.json({
         success: true,
-        allocationId: "done",
+        message: "Allocation completed",
       });
+
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: err.message });
+
+      res.status(500).json({
+        error: err.message,
+      });
     }
-  },
+  }
 );
 
 module.exports = router;
