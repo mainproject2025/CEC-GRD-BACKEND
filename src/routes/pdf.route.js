@@ -52,7 +52,6 @@ function reconstructAllocation(hallsData) {
   return allocation;
 }
 
-
 function formatWithHalfDay(dateTimeStr) {
   const [date, time] = dateTimeStr.split("T");
   const hour = parseInt(time.split(":")[0], 10);
@@ -63,7 +62,7 @@ function formatWithHalfDay(dateTimeStr) {
 /* =========================================================
    📄 GENERATE HALL HTML
 ========================================================= */
-function generateHallHTML(allocation) {
+function generateHallHTML(allocation,date) {
   const hallHTMLs = {};
 
   for (const [hallName, rows] of Object.entries(allocation)) {
@@ -80,7 +79,7 @@ function generateHallHTML(allocation) {
             batch: student.batch,
             row: rIdx + 1,
             col: bIdx * 3 + sIdx + 1,
-            examDate:student.examDate
+            examDate: student.examDate,
           });
         }),
       ),
@@ -106,8 +105,8 @@ function generateHallHTML(allocation) {
       th { background: #f0f0f0; }
     </style>
 
-    <h1>Hall Seating Arrangement</h1>
-    <h2>Hall: ${hallName}</h2>
+   
+    
     `;
 
     // Object.keys(grouped)
@@ -139,21 +138,23 @@ function generateHallHTML(allocation) {
     //     html += "</table>";
     //   });
 
-
-    html += `<h2>Grid</h2><table class="grid">`;
+    html += ` <h1>College of Engineering Chengannur</h1>
+    <h1>Seating Grid Room [${hallName}]</h1><table class="grid">
+    <h5>Exam Date:${formatWithHalfDay(
+    date,
+  )}</h5>
+  <table class="grid">`;
     const maxSeatsPerBench = Math.max(
       ...rows.flatMap((row) => row.map((bench) => bench.length)),
     );
 
+    // html += "<tr><td></td>";
+    // rows[0].forEach((bench,i) => {
+    //     html += `<th>${String.fromCharCode(65+i)}</th>`;
+    // });
+    // html += "</tr>";
 
-      // html += "<tr><td></td>";
-      // rows[0].forEach((bench,i) => {
-      //     html += `<th>${String.fromCharCode(65+i)}</th>`;
-      // });
-      // html += "</tr>";
- 
-
-    rows.forEach((row,i) => {
+    rows.forEach((row, i) => {
       html += "<tr>";
       // html += `<th>${i+1}</th>`;
       row.forEach((bench) => {
@@ -166,37 +167,46 @@ function generateHallHTML(allocation) {
     });
 
     html += "</table>";
-    html += `<div class="page-break"></div><h1>Attendance Sheet</h1><table class="grid">`;
-    html += `
-    <h2>${hallName}</h2>
+    html += `<div class="page-break"></div>
+    <h1>College of Engineering Chengannur</h1>
+
+    <h1>Attendance Sheet Room [${hallName}]</h1><table class="grid">
+    <h5>Exam Date:${formatWithHalfDay(
+    date,
+  )}</h5>
     `;
+   
 
     for (const year of Object.keys(grouped).sort()) {
       html += `
-      <h3>Year: ${year}</h3>
+    <h3>Year: ${year=='A'?2:3}</h3>
 
-      <table>
-        <tr>
-          <th>Sl</th>
-          <th>Name</th>
-          <th>Roll</th>
-          <th>Signature</th>
-        </tr>
-      `;
+    <table>
+      <tr>
+        <th>Sl</th>
+        <th>Name</th>
+        <th>Roll</th>
+        <th>Signature</th>
+      </tr>
+  `;
 
-      grouped[year].forEach((s, i) => {
-        html += `
+      // Sort students by name (ascending)
+      grouped[year]
+        .sort((a, b) => a.roll.localeCompare(b.roll))
+        .forEach((s, i) => {
+          html += `
         <tr>
           <td>${i + 1}</td>
           <td>${s.name}</td>
           <td>${s.roll}</td>
           <td></td>
         </tr>
-        `;
-      });
+      `;
+        });
 
       html += `</table>`;
     }
+
     hallHTMLs[hallName] = html;
   }
 
@@ -206,7 +216,7 @@ function generateHallHTML(allocation) {
 /* =========================================================
    📊 GENERATE SUMMARY HTML
 ========================================================= */
-function generateSummaryHTML(allocation,date) {
+function generateSummaryHTML(allocation, date) {
   let html = `
   <style>
     body { font-family: Arial; font-size: 14px; }
@@ -215,9 +225,10 @@ function generateSummaryHTML(allocation,date) {
     th { background:#eee; }
   </style>
   <h1>College of Engineering Chengannur</h1>
-  <h1 style="text-align:center">Hall Allocation Summary </h1><h6>Date:${formatWithHalfDay(date)}</h6>
+  <h1 style="text-align:center">Hall Allocation Summary </h1><h6>Date:${formatWithHalfDay(
+    date,
+  )}</h6>
   `;
-  
 
   for (const [hall, rows] of Object.entries(allocation)) {
     const map = {};
@@ -252,7 +263,7 @@ function generateSummaryHTML(allocation,date) {
 
         html += `
         <tr>
-          <td>${year}</td>
+          <td>${rolls[0].includes("24")?2:rolls[0].includes("23")?3:4}</td>
           <td>${batch}</td>
           <td>${rolls[0]}</td>
           <td>${rolls[rolls.length - 1]}</td>
@@ -264,7 +275,6 @@ function generateSummaryHTML(allocation,date) {
     );
 
     html += "</table>";
-  
   }
   return html;
 }
@@ -294,26 +304,25 @@ router.post("/", async (req, res) => {
     /* =====================================
        ✅ RETURN CACHE IF EXISTS
     ===================================== */
-    if (data.summary && data.rooms) {
-      console.log("✅ Returning cached HTML");
+    // if (data.summary && data.rooms) {
+    //   console.log("✅ Returning cached HTML");
 
-      return res.json({
-        success: true,
-        cached: true,
-        summary: data.summary,
-        rooms: data.rooms,
-      });
-    }
+    //   return res.json({
+    //     success: true,
+    //     cached: true,
+    //     summary: data.summary,
+    //     rooms: data.rooms,
+    //   });
+    // }
     /* =====================================
        ⚡ GENERATE NEW
     ===================================== */
     console.log("⚡ Generating new HTML");
 
-
     const allocation = reconstructAllocation(data.halls);
 
-    const roomHTMLs = generateHallHTML(allocation);
-    const summaryHTML = generateSummaryHTML(allocation,data.examDate);
+    const roomHTMLs = generateHallHTML(allocation,data.examDate);
+    const summaryHTML = generateSummaryHTML(allocation, data.examDate);
 
     /* =====================================
        💾 SAVE TO FIRESTORE
