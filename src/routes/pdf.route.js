@@ -179,7 +179,7 @@ function generateHallHTML(allocation,date) {
 
     for (const year of Object.keys(grouped).sort()) {
       html += `
-    <h3>Year: ${year=='A'?2:3}</h3>
+    <h3>Year: ${year}</h3>
 
     <table>
       <tr>
@@ -263,7 +263,7 @@ function generateSummaryHTML(allocation, date) {
 
         html += `
         <tr>
-          <td>${rolls[0].includes("24")?2:rolls[0].includes("23")?3:4}</td>
+          <td>${year}</td>
           <td>${batch}</td>
           <td>${rolls[0]}</td>
           <td>${rolls[rolls.length - 1]}</td>

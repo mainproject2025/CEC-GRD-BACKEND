@@ -9,6 +9,7 @@ const upload = multer({ dest: "uploads/" });
 
 const { admin, db } = require("../config/firebase");
 
+const StudYear={}
 /* ================================
    CSV PARSER
 ================================ */
@@ -270,7 +271,7 @@ function serializeAllocationForFirestore(allocation) {
 
             subject: s.subject || null,
 
-            year: s.year || null,
+            year: s.YEAR || null,
 
             batch: s.Batch || null,
 
@@ -327,9 +328,12 @@ router.post(
 
         const students = await parseCSV(file);
 
+
+
         yearMap[year] = students.map((s) => ({
           ...s,
           year,
+          YEAR:s.year,
           subject: s.Subject || s.subject,
         }));
       }
@@ -378,8 +382,8 @@ router.post(
           hallsData
         );
 
-      // Print final seating
-      printAllocation(allocation);
+      // // Print final seating
+      // printAllocation(allocation);
 
       /* -----------------------------
          SAVE TO FIRESTORE
@@ -390,29 +394,29 @@ router.post(
       const types = req.body.type;
       const examDate = req.body.examDate;
 
-      await db
-        .collection("examAllocations")
-        .add({
-          meta: {
-            totalStudents: merged.length,
-            method: "AB Column-wise Subject Grouped",
-          },
+      // await db
+      //   .collection("examAllocations")
+      //   .add({
+      //     meta: {
+      //       totalStudents: merged.length,
+      //       method: "AB Column-wise Subject Grouped",
+      //     },
 
-          halls:
-            serializeAllocationForFirestore(
-              allocation
-            ),
+      //     halls:
+      //       serializeAllocationForFirestore(
+      //         allocation
+      //       ),
 
-          createdAt:
-            admin.firestore.FieldValue.serverTimestamp(),
+      //     createdAt:
+      //       admin.firestore.FieldValue.serverTimestamp(),
 
-          name,
-          sems,
+      //     name,
+      //     sems,
 
-          isElective: types !== "Normal",
+      //     isElective: types !== "Normal",
 
-          examDate,
-        });
+      //     examDate,
+      //   });
 
       res.json({
         success: true,

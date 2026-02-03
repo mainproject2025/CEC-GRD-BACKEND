@@ -51,10 +51,16 @@ function reconstructAllocation(hallsData) {
   return allocation;
 }
 
+function formatWithHalfDay(dateTimeStr) {
+  const [date, time] = dateTimeStr.split("T");
+  const hour = parseInt(time.split(":")[0], 10);
+  const period = hour < 12 ? "Forenoon" : "Afternoon";
+  return `${date} ${period}`;
+}
 /* =====================================================
    📄 GENERATE HALL + ATTENDANCE HTML
 ===================================================== */
-function generateHallHTML(allocation) {
+function generateHallHTML(allocation,date) {
   const hallHTMLs = {};
 
   for (const [hallName, rows] of Object.entries(allocation)) {
@@ -99,7 +105,7 @@ function generateHallHTML(allocation) {
     <h2>First Series Examination Feb26</h2>
     <h2>Hall Seating Arrangement (Generated Using CEC-GRID)</h2>
     <h2>${hallName}</h2>
-    <h2>Date:Feb 02 2026 (AN)</h2>
+    <h5>Exam Date:${formatWithHalfDay(date)}</h5>
     `;
 
     /* Seating Table */
@@ -134,7 +140,7 @@ function generateHallHTML(allocation) {
     <h2>First Series Examination Feb26</h2>
     <h2>Seating Grid (Generated Using CEC-GRID)</h2>
     <h2>${hallName}</h2>
-    <h4>Date:Feb 02 2026 (AN)</h4><table class="grid">`;
+    <h5>Exam Date:${formatWithHalfDay(date)}</h5><table class="grid">`;
 
     const maxSeatsPerBench = Math.max(
       ...rows.flatMap((row) => row.map((bench) => bench.length)),
@@ -268,7 +274,7 @@ function generateHallHTML(allocation) {
     <h2>College of Engineering Chengannur</h2>
     <h2>First Series Examination Feb26</h2>
     <h2>Attendance Sheet (Generated Using CEC-GRID)</h2>
-    <h4>Date:Feb 02 2026 (AN)</h4><table class="grid">`;
+    <h5>Exam Date:${formatWithHalfDay(date)}</h5><table class="grid">`;
     /* Attendance Sheet */
 
     html += `
@@ -277,7 +283,7 @@ function generateHallHTML(allocation) {
 
     for (const year of Object.keys(yearMap).sort()) {
       html += `
-      <h3>Year: ${year=="A" ?4:2 }</h3>
+      <h3>Year: ${year }</h3>
 
       <table>
         <tr>
@@ -311,7 +317,7 @@ function generateHallHTML(allocation) {
 /* =====================================================
    📊 GENERATE ROLL SUMMARY HTML
 ===================================================== */
-function generateSummaryHTML(allocation) {
+function generateSummaryHTML(allocation,date) {
   let html = `
   <style>
     body { font-family: Arial; font-size: 13px; }
@@ -323,7 +329,7 @@ function generateSummaryHTML(allocation) {
     <h2>College of Engineering Chengannur</h2>
     <h2>First Series Examination Feb26</h2>
     <h2>Hall Summary(Generated Using CEC-GRID)</h2>
-    <h4>Date:Feb 02 2026 (AN)</h4>
+    <h5>Exam Date:${formatWithHalfDay(date)}</h5>
   `;
 
   for (const [hallName, rows] of Object.entries(allocation)) {
@@ -424,8 +430,8 @@ router.post("/", async (req, res) => {
 
     const allocation = reconstructAllocation(data.halls);
 
-    const hallHTML = generateHallHTML(allocation);
-    const summaryHTML = generateSummaryHTML(allocation);
+    const hallHTML = generateHallHTML(allocation,req.body.examDate);
+    const summaryHTML = generateSummaryHTML(allocation,req.body.examDate);
 
     /* =====================================
        💾 SAVE

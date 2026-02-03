@@ -270,7 +270,7 @@ function serializeAllocationForFirestore(allocation) {
 
             subject: s.subject || null,
 
-            year: s.year || null,
+            year: s.YEAR || null,
 
             batch: s.Batch || null,
 
@@ -330,6 +330,7 @@ router.post(
         yearMap[year] = students.map((s) => ({
           ...s,
           year,
+          YEAR:s.year,
           subject: s.Subject || s.subject,
         }));
       }
