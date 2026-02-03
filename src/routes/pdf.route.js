@@ -304,16 +304,16 @@ router.post("/", async (req, res) => {
     /* =====================================
        ✅ RETURN CACHE IF EXISTS
     ===================================== */
-    // if (data.summary && data.rooms) {
-    //   console.log("✅ Returning cached HTML");
+    if (data.summary && data.rooms) {
+      console.log("✅ Returning cached HTML");
 
-    //   return res.json({
-    //     success: true,
-    //     cached: true,
-    //     summary: data.summary,
-    //     rooms: data.rooms,
-    //   });
-    // }
+      return res.json({
+        success: true,
+        cached: true,
+        summary: data.summary,
+        rooms: data.rooms,
+      });
+    }
     /* =====================================
        ⚡ GENERATE NEW
     ===================================== */
