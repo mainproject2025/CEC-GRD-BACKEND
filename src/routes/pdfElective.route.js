@@ -429,6 +429,29 @@ th {
 </body>
 </html>
 `;
+html += `
+  <br><br>
+  <table style="width:100%; margin-bottom:20px;">
+    <tr>
+      <th style="text-align:left;">Absentees (Roll Numbers)</th>
+    </tr>
+    <tr>
+      <td style="height:60px;"></td>
+    </tr>
+  </table>
+  <table style="width:100%; border:none; margin-top:40px;">
+    <tr style="border:none;">
+      <td style="border:none; width:50%;">
+
+        Name of Invigilator: ______________________________
+      </td>
+      <td style="border:none; width:50%; text-align:right;">
+        Signature: ______________________________
+      </td>
+    </tr>
+  </table>
+`;
+
 
     hallHTMLs[hallName] = html;
   }
@@ -495,9 +518,9 @@ function generateSummaryHTML(allocation, date) {
           .forEach((batch) => {
             html += `
           <tr>
-            <td>${year == "A" ? 4 : 2}</td>
-            <td>${batch}</td>
-            <td>${map[year][batch].sort().join(", ")}</td>
+            <td><b>${year == "A" ? 4 : 2}</b></td>
+            <td><b>${batch}</b></td>
+            <td style="text-align:left;"><b>${map[year][batch].sort().join(", ")}</b></td>
             <td></td>
           </tr>
           `;
