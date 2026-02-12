@@ -84,6 +84,72 @@ router.post("/login", async (req, res) => {
   }
 });
 
+
+/* ================================
+   FETCH ALL ADMINS
+================================ */
+router.get("/admins", async (req, res) => {
+  try {
+    const snap = await db
+      .collection("users")
+      .where("role", "==", "admin")
+      .orderBy("createdAt", "desc")
+      .get();
+
+    const admins = snap.docs.map((doc) => ({
+      uid: doc.id,
+      ...doc.data(),
+    }));
+
+    res.json({
+      success: true,
+      count: admins.length,
+      admins,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+});
+
+
+/* ================================
+   DELETE ADMIN BY UID
+================================ */
+router.delete("/adminDelete/:uid", async (req, res) => {
+  try {
+    const { uid } = req.params;
+
+    if (!uid) {
+      return res.status(400).json({
+        success: false,
+        message: "Admin UID required",
+      });
+    }
+
+    // Delete from Firebase Auth
+    await admin.auth().deleteUser(uid);
+
+    // Delete from Firestore
+    await db.collection("users").doc(uid).delete();
+
+    res.json({
+      success: true,
+      message: "Admin deleted successfully",
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+});
+
+
 /* ================================
    AUTH MIDDLEWARE
 ================================ */
@@ -103,6 +169,8 @@ async function authenticate(req, res, next) {
     res.status(401).json({ message: "Invalid token" });
   }
 }
+
+ 
 
 /* ================================
    GET CURRENT USER

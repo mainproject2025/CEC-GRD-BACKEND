@@ -62,150 +62,371 @@ function formatWithHalfDay(dateTimeStr) {
 /* =========================================================
    📄 GENERATE HALL HTML
 ========================================================= */
-function generateHallHTML(allocation,date) {
+function generateHallHTML(allocation, date) {
   const hallHTMLs = {};
 
   for (const [hallName, rows] of Object.entries(allocation)) {
     const students = [];
 
+    const hallType = rows.hallType || "Bench";
+
+    /* Collect Students */
     rows.forEach((row, rIdx) =>
       row.forEach((bench, bIdx) =>
-        bench.forEach((student, sIdx) => {
-          if (!student) return;
+        bench.forEach((s) => {
+          if (!s) return;
+
           students.push({
-            name: student.Name || "N/A",
-            roll: student.RollNumber || "N/A",
-            year: student.year,
-            batch: student.batch,
+            name: s.Name,
+            roll: s.RollNumber,
+            year: s.year,
             row: rIdx + 1,
-            col: bIdx * 3 + sIdx + 1,
-            examDate: student.examDate,
+            seatLabel: String.fromCharCode(65 + rIdx) + (bIdx + 1),
           });
-        }),
-      ),
+        })
+      )
     );
 
-    const grouped = {};
+    /* Group by Year */
+    const yearMap = {};
 
     students.forEach((s) => {
-      grouped[s.year] ??= [];
-      grouped[s.year].push(s);
+      yearMap[s.year] ??= [];
+      yearMap[s.year].push(s);
     });
 
-    Object.values(grouped).forEach((arr) =>
-      arr.sort((a, b) => (a.row === b.row ? a.col - b.col : a.row - b.row)),
+    Object.values(yearMap).forEach((arr) =>
+      arr.sort((a, b) => a.name.localeCompare(b.name))
     );
+
+    /* Base HTML */
 
     let html = `
-    <style>
-      body { font-family: Arial; font-size: 11px; }
-      h1, h2 { text-align: center; }
-      table { width: 100%; border-collapse: collapse; font-size:10px; }
-      th, td { border: 1px solid #000; padding: 4px; }
-      th { background: #f0f0f0; }
-    </style>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+
+<style>
+
+body {
+  font-family: Arial;
+  font-size: 12px;
+  margin: 6mm;
+}
+
+h1, h2, h3, h5 {
+  text-align: center;
+  margin: 4px 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 18px;
+}
+
+th, td {
+  border: 1px solid #000;
+  font-size: 12px;
+  padding: 4px;
+  text-align: center;
+}
+
+th {
+  background: #eee;
+}
+
+ 
+
+/* ================= PRINT ================= */
+
+@media print {
+
+  body {
+    margin-left: 4mm;
+    margin-right: 4mm;
+  }
 
    
-    
-    `;
 
-    // Object.keys(grouped)
-    //   .sort()
-    //   .forEach((year) => {
-    //     html += `
-    //     <h3>Year: ${year}</h3>
+}
 
-    //     <table>
-    //       <tr>
-    //         <th>Sl No</th>
-    //         <th>Name</th>
-    //         <th>Roll</th>
-    //         <th>Row</th>
-    //       </tr>
-    //   `;
+/* ================= GRID (BIG SIZE) ================= */
 
-    //     grouped[year].forEach((s, i) => {
-    //       html += `
-    //       <tr>
-    //         <td>${i + 1}</td>
-    //         <td>${s.name}</td>
-    //         <td>${s.roll}</td>
-    //         <td>${s.row}</td>
-    //       </tr>
-    //     `;
-    //     });
+.grid-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px;
+  align-items: center;
+  width: 100%;
+  page-break-inside: avoid;
+}
 
-    //     html += "</table>";
-    //   });
+/* Row */
 
-    html += ` <h1>College of Engineering Chengannur</h1>
-    <h1>Seating Grid Room [${hallName}]</h1><table class="grid">
-    <h5>Exam Date:${formatWithHalfDay(
-    date,
-  )}</h5>
-  <table class="grid">`;
-    const maxSeatsPerBench = Math.max(
-      ...rows.flatMap((row) => row.map((bench) => bench.length)),
-    );
+.row-visual {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 6px;
+  align-items: center;
+  page-break-inside: avoid;
+}
 
-    // html += "<tr><td></td>";
-    // rows[0].forEach((bench,i) => {
-    //     html += `<th>${String.fromCharCode(65+i)}</th>`;
-    // });
-    // html += "</tr>";
+/* Row Label */
 
-    rows.forEach((row, i) => {
-      html += "<tr>";
-      // html += `<th>${i+1}</th>`;
-      row.forEach((bench) => {
-        for (let i = 0; i < maxSeatsPerBench; i++) {
-          const s = bench[i];
-          html += `<td>${s ? s.RollNumber : ""}</td>`;
-        }
-      });
-      html += "</th>";
-    });
+.row-label-visual {
+  font-weight: bold;
+  width: 28px;
+  font-size: 13px;
+}
 
-    html += "</table>";
-    html += `<div class="page-break"></div>
-    <h1>College of Engineering Chengannur</h1>
+/* Bench */
 
-    <h1>Attendance Sheet Room [${hallName}]</h1><table class="grid">
-    <h5>Exam Date:${formatWithHalfDay(
-    date,
-  )}</h5>
-    `;
-   
+.bench-visual {
+  border: 1.5px solid #333;
+  padding: 4px;
+  display: flex;
+  gap: 5px;
+  background: #fff;
+}
 
-    for (const year of Object.keys(grouped).sort()) {
+/* Chair */
+
+.chair-visual {
+  border: 1.5px solid #555;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f8f8f8;
+  font-size: 10px;
+  border-radius: 3px;
+  flex-direction: column;
+}
+
+/* Seat */
+
+.seat-visual {
+  border: 1px dashed #aaa;
+  padding: 3px;
+  font-size: 10px;
+  min-width: 38px;
+  text-align: center;
+  background: #fff;
+}
+
+/* Empty */
+
+.empty-seat {
+  color: #bbb;
+}
+
+/* Roll */
+
+.seat-roll {
+  font-weight: bold;
+  font-size: 10px;
+  line-height: 1.1;
+}
+
+/* Year */
+
+.seat-year {
+  font-size: 9px;
+  color: #666;
+  line-height: 1;
+}
+
+.direction-board {
+  width: 100%;
+  text-align: center;
+  font-weight: bold;
+  font-size: 15px;
+  color: white;
+ 
+  border-radius: 6px;
+  letter-spacing: 1px;
+ 
+  margin-bottom: 10px;
+}
+
+</style>
+</head>
+
+<body>
+
+<h2>College of Engineering Chengannur</h2>
+<h2>First Series Examination Feb26</h2>
+<h2>Hall Seating Arrangement (${hallType})</h2>
+<h2>${hallName}</h2>
+<h5>Exam Date: ${formatWithHalfDay(date)}</h5>
+`;
+
+    /* ================= SEATING LIST ================= */
+
+    for (const year of Object.keys(yearMap).sort()) {
       html += `
-    <h3>Year: ${year}</h3>
+<h3>Year: ${year}</h3>
 
-    <table>
-      <tr>
-        <th>Sl</th>
-        <th>Name</th>
-        <th>Roll</th>
-        <th>Signature</th>
-      </tr>
-  `;
+<table>
+<tr>
+  <th>Sl</th>
+  <th>Name</th>
+  <th>Roll</th>
+  <th>Seat</th>
+</tr>
+`;
 
-      // Sort students by name (ascending)
-      grouped[year]
-        .sort((a, b) => a.roll.localeCompare(b.roll))
-        .forEach((s, i) => {
-          html += `
-        <tr>
-          <td>${i + 1}</td>
-          <td>${s.name}</td>
-          <td>${s.roll}</td>
-          <td></td>
-        </tr>
-      `;
-        });
+      yearMap[year].forEach((s, i) => {
+        html += `
+<tr>
+  <td>${i + 1}</td>
+  <td>${s.name}</td>
+  <td>${s.roll}</td>
+  <td>${s.seatLabel} (R${s.row})</td>
+</tr>
+`;
+      });
 
       html += `</table>`;
     }
+
+    /* ================= GRID ================= */
+
+    html += `
+<div class="page-break"></div>
+
+<h2>Seating Grid [${hallName}]</h2>
+<h5>Exam Date: ${formatWithHalfDay(date)}</h5>
+
+<div class="grid-container">
+<div class="direction-board">
+⬆ ALL EYES THIS WAY ⬆
+</div>
+
+`;
+
+    rows.forEach((row, r) => {
+      html += `<div class="row-visual">`;
+
+      const rowLabel = 1 + r;
+
+      html += `<div class="row-label-visual">${rowLabel}</div>`;
+
+      /* BENCH MODE */
+
+      if (hallType === "Bench") {
+        const benchCount = Math.ceil(row.length / 3);
+
+        for (let b = 0; b < benchCount; b++) {
+          html += `<div class="bench-visual">`;
+
+          for (let k = 0; k < 3; k++) {
+            const colIdx = b * 3 + k;
+
+            if (colIdx >= row.length) break;
+
+            const seatData = row[colIdx];
+            const student =
+              seatData && seatData.length ? seatData[0] : null;
+
+            html += `<div class="seat-visual ${student ? "" : "empty-seat"
+              }">`;
+
+            if (student) {
+              html += `
+<span class="seat-roll">${student.RollNumber || "?"}</span>
+<span class="seat-year">${student.year}</span>
+`;
+            } else {
+              html += "Empty";
+            }
+
+            html += `</div>`;
+          }
+
+          html += `</div>`;
+        }
+
+      }
+
+      /* CHAIR MODE */
+
+      else {
+        row.forEach((seatData) => {
+          const student =
+            seatData && seatData.length ? seatData[0] : null;
+
+          html += `<div class="chair-visual ${student ? "" : "empty-seat"
+            }">`;
+
+          if (student) {
+            html += `
+<span class="seat-roll">${student.RollNumber || "?"}</span>
+<span class="seat-year">${student.year}</span>
+`;
+          } else {
+            html += "Empty";
+          }
+
+          html += `</div>`;
+        });
+      }
+
+      html += `</div>`;
+    });
+
+    html += `
+</div>
+`;
+
+    /* ================= ATTENDANCE ================= */
+
+    html += `
+<div class="page-break"></div>
+
+<h2>Attendance Sheet</h2>
+<h5>Exam Date: ${formatWithHalfDay(date)}</h5>
+
+<h2>${hallName}</h2>
+`;
+
+    for (const year of Object.keys(yearMap).sort()) {
+      html += `
+<h3>Year: ${year}</h3>
+
+<table>
+<tr>
+  <th>Sl</th>
+  <th>Name</th>
+  <th>Roll</th>
+  <th>Signature</th>
+</tr>
+`;
+
+      yearMap[year].forEach((s, i) => {
+        html += `
+<tr>
+  <td>${i + 1}</td>
+  <td>${s.name}</td>
+  <td>${s.roll}</td>
+  <td></td>
+</tr>
+`;
+      });
+
+      html += `</table>`;
+    }
+
+    /* CLOSE */
+
+    html += `
+</body>
+</html>
+`;
 
     hallHTMLs[hallName] = html;
   }
@@ -304,16 +525,16 @@ router.post("/", async (req, res) => {
     /* =====================================
        ✅ RETURN CACHE IF EXISTS
     ===================================== */
-    if (data.summary && data.rooms) {
-      console.log("✅ Returning cached HTML");
+    // if (data.summary && data.rooms) {
+    //   console.log("✅ Returning cached HTML");
 
-      return res.json({
-        success: true,
-        cached: true,
-        summary: data.summary,
-        rooms: data.rooms,
-      });
-    }
+    //   return res.json({
+    //     success: true,
+    //     cached: true,
+    //     summary: data.summary,
+    //     rooms: data.rooms,
+    //   });
+    // }
     /* =====================================
        ⚡ GENERATE NEW
     ===================================== */

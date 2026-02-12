@@ -50,40 +50,56 @@ router.get("/", async (req, res) => {
   }
 });
 
+router.patch('/examDelete',(req,res)=>{
+  const {examId}=req.body
+
+  try {
+    
+    db.collection('examAllocations').doc(examId).delete().then(()=>{
+      res.json({success:true})
+    })
+
+  } catch (error) {
+    
+    res.status(500).json({success:false,reason:"Firebase couldn't delete the exam try again"})
+
+  }
+})
+
 /* ================================
    UPDATE isPublished
    PATCH /exams/:id/publish
 ================================ */
-router.patch("/:id/publish", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { isPublished } = req.body;
+// router.patch("/:id/publish", async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { isPublished } = req.body;
 
-    const ref = db.collection("examAllocations").doc(id);
-    const doc = await ref.get();
+//     const ref = db.collection("examAllocations").doc(id);
+//     const doc = await ref.get();
 
-    if (!doc.exists) {
-      return res.status(404).json({
-        success: false,
-        message: "Exam not found",
-      });
-    }
+//     if (!doc.exists) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Exam not found",
+//       });
+//     }
 
-    await ref.update({
-      isPublished:true
-    });
+//     await ref.update({
+//       isPublished:true
+//     });
 
-    res.json({
-      success: true,
-      message: `Exam ${isPublished ? "published" : "unpublished"} successfully`,
-    });
-  } catch (err) {
-    console.error("PUBLISH EXAM ERROR:", err);
-    res.status(500).json({
-      success: false,
-      message: "Failed to update publish status",
-    });
-  }
-});
+//     res.json({
+//       success: true,
+//       message: `Exam ${isPublished ? "published" : "unpublished"} successfully`,
+//     });
+//   } catch (err) {
+//     console.error("PUBLISH EXAM ERROR:", err);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to update publish status",
+//     });
+//   }
+// });
 
 module.exports = router;

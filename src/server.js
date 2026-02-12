@@ -25,6 +25,9 @@ const notifications = require("./routes/utils/notification.route");
 
 // ✅ HALL ROUTES (IMPORTANT)
 const fetchHalls = require("./routes/utils/fetchHalls.route");
+const entireDetails=require("./routes/utils/FetchDetails.route");
+const updateExamDetails=require('./routes/utils/updateHallDetails.route');
+const deleteExam=require('./routes/utils/deleteExam.route');
 
 /* ======================
    ROUTE MIDDLEWARES
@@ -38,6 +41,10 @@ app.use("/auth", auth);
 app.use("/FetchExamDetails", FetchExamDetails);
 app.use("/MakePdfCommon", pdfMakerCommon);
 app.use("/notification", notifications);
+app.use("/fetchDetails",entireDetails);
+app.use("/updateExamDetails",updateExamDetails);
+app.use("/deleteExam",deleteExam);
+
 
 // ✅ HALL CRUD API
 app.use("/halls", fetchHalls);

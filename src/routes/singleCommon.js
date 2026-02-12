@@ -258,52 +258,54 @@ function generateSeatingPlan(halls, groups, rollToBranch) {
   console.log("2 Bench Cap:", cap2);
   console.log("Mode:", globalTwo ? "2" : "3");
 
+  /* ---------- ALLOCATION ---------- */
+
   halls.forEach((hall, index) => {
+    const rows = Number(hall.Rows);
+    const columns = Number(hall.Columns);
+    const startObjIndex = index % order.length;
 
-    let localTwo = globalTwo;
+    // Determine Hall Type
+    const rawType = hall.Type || hall.type || hall.Furniture || hall.furniture || hall.SeatingType || "Bench";
+    // const type = rawType.toLowerCase().includes("chair") ? "Chair" : "Bench";
 
-    const start = index;
+    const seats = Array.from({ length: rows }, () => Array(columns).fill(""));
 
-    /* ---------- OPTIMIZATION ---------- */
+    // Column-wise filling
+    for (let c = 0; c < columns; c++) {
 
-    if (!globalTwo) {
+      // If in 2-seater mode (globalTwo), skip the middle seat of a 3-seater bench (index 1, 4, 7...)
+      if (globalTwo && c % 3 === 1) continue;
 
-      const sim3 = allocateHall(
-        hall,
-        groups,
-        { ...pointers },
-        order,
-        start,
-        false
-      );
+      // Determine logical group for this column
+      // This creates the vertical striping effect: A B C A B C...
+      let groupIndex = (startObjIndex + c) % order.length;
 
-      const cap = getHallCapacity(hall, true);
+      for (let r = 0; r < rows; r++) {
 
-      if (sim3.count <= cap) {
-        localTwo = true;
+        let placed = false;
+        let attempts = 0;
+        let currentKeyIndex = groupIndex;
 
-        console.log(
-          `Optimized: ${hall.HallName} → 2 Bench`
-        );
+        while (attempts < order.length) {
+          const k = order[currentKeyIndex];
+
+          if (pointers[k] < groups[k].length) {
+            seats[r][c] = groups[k][pointers[k]++];
+            placed = true;
+            break;
+          }
+
+          // If preferred group empty, try next group
+          currentKeyIndex = (currentKeyIndex + 1) % order.length;
+          attempts++;
+        }
       }
     }
 
-    /* ---------- ALLOCATION ---------- */
-
-    let result = allocateHall(
-      hall,
-      groups,
-      pointers,
-      order,
-      start,
-      localTwo
-    );
-
-    let seats = result.seats;
-
     /* ---------- EVALUATION ---------- */
 
-    seats = solveAdjacencyConstraints(
+    const optimizedSeats = solveAdjacencyConstraints(
       seats,
       rollToBranch
     );
@@ -312,14 +314,14 @@ function generateSeatingPlan(halls, groups, rollToBranch) {
 
     printHallAllocation(
       hall.HallName,
-      seats,
+      optimizedSeats,
       rollToBranch
     );
 
     results.push({
       hallName: hall.HallName,
-      allocation: seats,
-      maxBench: localTwo ? 2 : 3
+      allocation: optimizedSeats,
+      maxBench: globalTwo ? 2 : 3
     });
   });
 

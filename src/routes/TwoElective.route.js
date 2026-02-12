@@ -73,131 +73,154 @@ function allocateColumnWiseAB(students, hallsData) {
   const A = students.filter((s) => s.year === "A");
   const B = students.filter((s) => s.year === "B");
 
-  let a = 0;
-  let b = 0;
+  let aIndex = 0;
+  let bIndex = 0;
 
   const allocation = {};
+  const report = [];
 
-  // Pattern per row (for 3 benches)
-  const rowPattern = [
-    ["A", "B", "A"], // Bench 1
-    ["B", "A", "B"], // Bench 2
-    ["A", "B", "A"], // Bench 3
-  ];
-
-  let oneYearFinished = false;
-
-  hallsData.forEach((hall) => {
+  hallsData.forEach((hall, hallIndex) => {
 
     const rows = Number(hall.Rows);
-    const benches = Math.floor(Number(hall.Columns) / 3);
+    const columns = Number(hall.Columns);
+    let hallPlacedCount = 0;
+
+    // Determine Hall Type (Bench vs Chair) from possible CSV headers
+    // Default to Bench if not explicitly "Chair"
+    const rawType = hall.Type || hall.type || hall.Furniture || hall.furniture || hall.SeatingType || "Bench";
+    const type = rawType.toLowerCase().includes("chair") ? "Chair" : "Bench";
 
     const matrix = Array.from({ length: rows }, () =>
-      Array.from({ length: benches }, () => [])
+      Array.from({ length: columns }, () => [])
     );
 
     // Column-wise filling
-    for (let col = 0; col < benches; col++) {
-
+    for (let col = 0; col < columns; col++) {
       for (let row = 0; row < rows; row++) {
 
-        const bench = [];
+        let targetYear = null;
 
-        const hasA = a < A.length;
-        const hasB = b < B.length;
+        if (type === "Bench") {
+          // BENCH PATTERN
+          const patternIndex = col % 3; // 0, 1, 2
 
-        /* ===============================
-           CASE 1: BOTH YEARS AVAILABLE
-           → USE ROW PATTERN (3 SEATS)
-        =============================== */
+          const aExhausted = aIndex >= A.length;
+          const bExhausted = bIndex >= B.length;
 
-        if (hasA && hasB && !oneYearFinished) {
-
-          const pattern =
-            rowPattern[col % rowPattern.length];
-
-          for (const p of pattern) {
-
-            if (p === "A" && a < A.length) {
-              bench.push(A[a++]);
-            }
-
-            else if (p === "B" && b < B.length) {
-              bench.push(B[b++]);
-            }
-
-            // Safety fallback
-            else if (a < A.length) {
-              bench.push(A[a++]);
-            }
-
-            else if (b < B.length) {
-              bench.push(B[b++]);
+          // Override if one year exhausted
+          if (aExhausted && !bExhausted) {
+            // Only B remains -> B _ B (2 per bench)
+            // Slots 0 and 2 get B.
+            if (patternIndex === 0 || patternIndex === 2) targetYear = "B";
+            else targetYear = null;
+          } else if (!aExhausted && bExhausted) {
+            // Only A remains -> A _ A (2 per bench)
+            // Slots 0 and 2 get A.
+            if (patternIndex === 0 || patternIndex === 2) targetYear = "A";
+            else targetYear = null;
+          } else {
+            // Standard Alternating
+            if (hallIndex % 2 === 0) {
+              // First Room -> A B A
+              if (patternIndex === 0) targetYear = "A";
+              else if (patternIndex === 1) targetYear = "B";
+              else targetYear = "A";
+            } else {
+              // Next Room -> B A B
+              if (patternIndex === 0) targetYear = "B";
+              else if (patternIndex === 1) targetYear = "A";
+              else targetYear = "B";
             }
           }
 
-          // If one year ended during fill
-          if (a >= A.length || b >= B.length) {
-            oneYearFinished = true;
+        } else {
+          // CHAIR PATTERN
+          const patternIndex = col % 2; // 0, 1
+
+          const aExhausted = aIndex >= A.length;
+          const bExhausted = bIndex >= B.length;
+
+          // Override if one year exhausted
+          if (aExhausted && !bExhausted) {
+            // Only B remains -> Request: B _ B B _ B
+            // This acts like a 3-column pattern: fill 0 and 2, skip 1.
+            const exPattern = col % 3;
+            if (exPattern === 0 || exPattern === 2) targetYear = "B";
+            else targetYear = null; // Skip middle
+          } else if (!aExhausted && bExhausted) {
+            // Only A remains -> Request: A _ A A _ A
+            const exPattern = col % 3;
+            if (exPattern === 0 || exPattern === 2) targetYear = "A";
+            else targetYear = null;
+          } else {
+            // Standard Alternating
+            if (hallIndex % 2 === 0) {
+              // First Room -> A B
+              targetYear = patternIndex === 0 ? "A" : "B";
+            } else {
+              // Next Room -> B A
+              targetYear = patternIndex === 0 ? "B" : "A";
+            }
           }
         }
 
-        /* ===============================
-           CASE 2: ONE YEAR FINISHED
-           → USE 2 PER BENCH
-        =============================== */
+        // Try to place student of targetYear
+        let student = null;
 
-        else {
-
-          oneYearFinished = true;
-
-          // Fill only with remaining students
-
-          if (a < A.length) bench.push(A[a++]);
-          if (a < A.length) bench.push(A[a++]);
-
-          if (b < B.length) bench.push(B[b++]);
-          if (b < B.length) bench.push(B[b++]);
+        if (targetYear === "A") {
+          if (aIndex < A.length) {
+            student = A[aIndex++];
+          }
+          // Strict pattern: no fallback to B here
+        } else if (targetYear === "B") {
+          if (bIndex < B.length) {
+            student = B[bIndex++];
+          }
         }
 
-        // Place bench if it has students
-        if (bench.length >= 2) {
-          matrix[row][col] = bench;
+        // Strict Fallback Logic (Adjacency Check)
+        if (!student && targetYear) {
+          // No student found for target year (exhausted?), but wait, handled by override above?
+          // Not completely. If override says null, we skip.
+          // If override says A but A is empty (shouldn't happen with override logic), then empty.
+          // But if specific slot didn't trigger override yet?
+          // Override logic relies on aExhausted check at column start. 
+          // Logic seems consistent.
+          // But let's keep the fallback check just in case, or rather just rely on pattern.
+          // The previous TwoCommon code didn't have extensive "if !student" logic because logic was tight.
+          // Wait, I see I removed the explicit fallback block in TwoCommon because 
+          // the exhaustion override handles the "filling" strategy. 
+        }
+
+        if (student) {
+          matrix[row][col] = [student];
+          hallPlacedCount++;
         }
       }
     }
 
     allocation[hall.HallName] = matrix;
+
+    report.push({
+      hall: hall.HallName,
+      placed: hallPlacedCount,
+      capacity: rows * columns,
+      type: type
+    });
   });
 
-  /* ===============================
-     PRINT REMAINING STUDENTS
-  =============================== */
+  const unplacedA = A.length - aIndex;
+  const unplacedB = B.length - bIndex;
 
-  const remaining = [];
-
-  while (a < A.length) remaining.push(A[a++]);
-  while (b < B.length) remaining.push(B[b++]);
-
-  if (remaining.length) {
-
-    console.log("\n⚠️ REMAINING STUDENTS\n");
-
-    remaining.forEach((s, i) => {
-      console.log(
-        `${i + 1}. Roll: ${s.Roll || s.RollNumber || "?"} | ` +
-        `Year: ${s.year} | Subject: ${s.subject}`
-      );
-    });
-
-    console.log("\n--------------------------\n");
-
-  } else {
-
-    console.log("\n✅ All students placed.\n");
-  }
-
-  return allocation;
+  return {
+    allocation,
+    report,
+    unplaced: {
+      A: unplacedA,
+      B: unplacedB,
+      total: unplacedA + unplacedB
+    }
+  };
 }
 
 
@@ -207,7 +230,7 @@ function allocateColumnWiseAB(students, hallsData) {
 /* ================================
    PRINT ALLOCATION
 ================================ */
-function printAllocation(allocation) {
+function printAllocation(allocation, report, unplaced) {
   console.log("\n========== SEATING ARRANGEMENT ==========\n");
 
   for (const [hall, rows] of Object.entries(allocation)) {
@@ -235,18 +258,39 @@ function printAllocation(allocation) {
 
     console.log("\n---------------------------------\n");
   }
+
+  console.log("\n========== ALLOCATION REPORT ==========\n");
+  if (report) {
+    report.forEach(r => {
+      console.log(`Hall: ${r.hall} | Placed: ${r.placed} | Capacity: ${r.capacity} | Type: ${r.type}`);
+    });
+  }
+
+  if (unplaced && unplaced.total > 0) {
+    console.log("\n⚠️ UNPLACED STUDENTS:");
+    console.log(`Year A: ${unplaced.A}`);
+    console.log(`Year B: ${unplaced.B}`);
+    console.log(`Total Unplaced: ${unplaced.total}`);
+  } else {
+    console.log("\n✅ All students placed successfully.");
+  }
 }
 
 /* ================================
    FIRESTORE SERIALIZER
 ================================ */
-function serializeAllocationForFirestore(allocation) {
+function serializeAllocationForFirestore(allocation, report) {
   const result = {};
 
   for (const [hall, rows] of Object.entries(allocation)) {
+    // Find metadata from report
+    const hallMeta = report.find(r => r.hall === hall);
+    const type = hallMeta ? hallMeta.type : "Bench"; // Default to Bench
+
     const hallData = {
       rows: rows.length,
       columns: rows[0]?.length || 0,
+      type: type
     };
 
     rows.forEach((row, r) => {
@@ -266,6 +310,7 @@ function serializeAllocationForFirestore(allocation) {
             name:
               s.StudentName ||
               s.Name ||
+              s.Student ||
               null,
 
             subject: s.subject || null,
@@ -327,12 +372,28 @@ router.post(
 
         const students = await parseCSV(file);
 
-        yearMap[year] = students.map((s) => ({
-          ...s,
-          year,
-          YEAR:s.year,
-          subject: s.Subject || s.subject,
-        }));
+        yearMap[year] = students
+          .filter(s => {
+            // Fuzzy find Roll key
+            const rollKey = Object.keys(s).find(k => k.toLowerCase().includes("roll")) || "Roll";
+            const roll = s[rollKey] || s["Roll Number"] || s.Roll; // try multiple variants
+            const sub = s.Subject || s.subject;
+
+            // Ensure roll is present and not just whitespace
+            const hasRoll = roll && String(roll).trim().length > 0;
+            return hasRoll;
+          })
+          .map((s) => {
+            const rollKey = Object.keys(s).find(k => k.toLowerCase().includes("roll")) || "Roll";
+            return {
+              ...s,
+              year,
+              YEAR: s.year,
+              // Normalize Roll property for easier access later
+              Roll: s[rollKey] || s["Roll Number"] || s.Roll || "UNKNOWN",
+              subject: s.Subject || s.subject,
+            };
+          });
       }
 
       /* -----------------------------
@@ -373,14 +434,22 @@ router.post(
          ALLOCATE SEATS
       ------------------------------ */
 
-      const allocation =
-        allocateColumnWiseAB(
-          ordered,
-          hallsData
-        );
+      const { allocation, report, unplaced } = allocateColumnWiseAB(ordered, hallsData);
 
       // Print final seating
-      printAllocation(allocation);
+      printAllocation(allocation, report, unplaced);
+
+      if (unplaced.total > 0) {
+        return res.status(400).json({
+          success: false,
+          error: `Allocation failed. ${unplaced.total} students could not be placed.`,
+          details: {
+            unplacedA: unplaced.A,
+            unplacedB: unplaced.B,
+            report: report
+          }
+        });
+      }
 
       /* -----------------------------
          SAVE TO FIRESTORE
@@ -401,7 +470,8 @@ router.post(
 
           halls:
             serializeAllocationForFirestore(
-              allocation
+              allocation,
+              report
             ),
 
           createdAt:
@@ -418,6 +488,8 @@ router.post(
       res.json({
         success: true,
         message: "Allocation completed",
+        report: report,
+        unplaced: unplaced
       });
 
     } catch (err) {

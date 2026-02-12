@@ -219,25 +219,53 @@ function generateSeatingPlan(halls, groups, rollToSubject) {
   const result = [];
 
   halls.forEach((hall, idx) => {
-    let useTwoBench = globalTwoBench;
-    if (!globalTwoBench) {
-      const cap2 = getHallCapacity(hall, true);
-      const cap3 = getHallCapacity(hall, false);
-      if (cap3 <= cap2) useTwoBench = true;
+    /* ---------- ALLOCATION ---------- */
+
+    const rows = Number(hall.Rows);
+    const columns = Number(hall.Columns);
+    const startObjIndex = idx % order.length;
+
+    // Determine Hall Type (Bench vs Chair)
+    const rawType = hall.Type || hall.type || hall.Furniture || hall.furniture || hall.SeatingType || "Bench";
+    const type = rawType.toLowerCase().includes("chair") ? "Chair" : "Bench";
+
+    const seats = Array.from({ length: rows }, () => Array(columns).fill(""));
+
+    // Expected Logic: Column-wise fill with interleaved subjects
+
+    for (let c = 0; c < columns; c++) {
+
+      let groupIndex = (startObjIndex + c) % order.length;
+
+      for (let r = 0; r < rows; r++) {
+
+        let placed = false;
+        let attempts = 0;
+        let currentKeyIndex = groupIndex;
+
+        while (attempts < order.length) {
+          const k = order[currentKeyIndex];
+
+          if (pointers[k] < groups[k].length) {
+            seats[r][c] = groups[k][pointers[k]++];
+            placed = true;
+            break;
+          }
+
+          currentKeyIndex = (currentKeyIndex + 1) % order.length;
+          attempts++;
+        }
+      }
     }
 
-    let { seats } = allocateHall(
-      hall, groups, pointers, order, idx, useTwoBench
-    );
-
     // seats = randomizeSeatsBySubject(seats, rollToSubject);
-    seats = fixSameSubjectAdjacency(seats, rollToSubject);
-    printHallAllocation(hall.HallName, seats, rollToSubject);
+    const optimizedSeats = fixSameSubjectAdjacency(seats, rollToSubject);
+    printHallAllocation(hall.HallName, optimizedSeats, rollToSubject);
 
     result.push({
       hallName: hall.HallName,
-      seats,
-      maxBench: useTwoBench ? 2 : 3
+      seats: optimizedSeats,
+      maxBench: 3
     });
   });
 
@@ -326,7 +354,7 @@ router.post(
       });
 
       console.log(req.body.examDate);
-      
+
       const doc = await db.collection("examAllocations").add({
         name: req.body.examName,
         sems: req.body.years,
@@ -338,9 +366,9 @@ router.post(
           studentsPerBench: raw[0]?.maxBench || 0
         },
         halls: firestoreHalls,
-        examDate:req.body.examDate
+        examDate: req.body.examDate
       });
-       
+
       res.json({ success: true, documentId: doc.id });
     } catch (err) {
       console.error(err);
