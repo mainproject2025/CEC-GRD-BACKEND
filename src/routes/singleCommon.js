@@ -12,19 +12,23 @@ const { admin, db } = require("../config/firebase");
    CSV → JSON
 ================================ */
 function excelToCsv(csvData) {
-  const lines = csvData.replace(/\r\n/g, "\n").split("\n").filter(Boolean);
-  const headers = lines[0].split(",").map(h => h.trim());
+  const lines = csvData.replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter(l => l.trim() !== "");
+
+  const headers = lines[0].split(",");
+
   return lines.slice(1).map(line => {
     const values = line.split(",");
-    return headers.reduce((o, h, i) => {
-      o[h] = values[i]?.trim() || "";
-      return o;
+    return headers.reduce((obj, h, i) => {
+      obj[h.trim()] = values[i]?.trim() || "";
+      return obj;
     }, {});
   });
 }
 
 /* ================================
-   UTILS
+   UTILITIES
 ================================ */
 function shuffleArray(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -35,419 +39,457 @@ function shuffleArray(arr) {
 }
 
 /* ================================
-   BATCH GROUPING
+   GROUP STUDENTS
 ================================ */
-function getSortedStudents(students) {
-  return students.sort((a, b) => {
-    // 1. Sort by Batch
-    const batchA = (a.Batch || "").trim();
-    const batchB = (b.Batch || "").trim();
-    if (batchA < batchB) return -1;
-    if (batchA > batchB) return 1;
+function groupStudents(students) {
+  const map = {};
 
-    // 2. Sort by Branch
-    const branchA = (a.Branch || "").trim();
-    const branchB = (b.Branch || "").trim();
-    if (branchA < branchB) return -1;
-    if (branchA > branchB) return 1;
-
-    // 3. Sort by Roll Number
-    return (a.RollNumber || "").localeCompare(b.RollNumber || "");
-  });
-}
-function printRollNumbers(students) {
-  students.forEach(student => {
-    console.log(student.RollNumber);
-  });
-}
-
-function groupByBatch(data) {
-  const batchMap = {};
-
-  // Sort first
-  data = getSortedStudents(data);
-
-  data.forEach(student => {
-    // Basic fields
-    student.name = student.StudentName || "";
-    student.subject = student.Common_Subject_1 || student.Subject || "";
-    student.year = student.year || "";
-    student.RollNumber = student.RollNumber || "";
-
-    // Determine batch
-    const batch = student.Batch || (student.RollNumber ? student.RollNumber.substring(0, 4) : "Unknown");
-    student.batch = batch;
-
-    if (!batchMap[batch]) batchMap[batch] = [];
-    batchMap[batch].push(student);
+  students.forEach(s => {
+    if (!map[s.Branch]) map[s.Branch] = [];
+    map[s.Branch].push(s.RollNumber);
   });
 
-  return batchMap;
+  return map;
 }
 
 /* ================================
-   HELPERS
+   MAP BUILDERS
 ================================ */
-
-function getTopNBatches(batchMap, n) {
-  return Object.entries(batchMap)
-    .filter(([_, students]) => students.length > 0)
-    .sort((a, b) => b[1].length - a[1].length)
-    .slice(0, n)
-    .map(([batch]) => batch);
+function buildRollToBranch(students) {
+  const map = {};
+  students.forEach(s => map[s.RollNumber] = s.Branch);
+  return map;
 }
 
-function getHighestFromSelected(batchMap, selectedBatches) {
-  let available = selectedBatches
-    .filter(batch => batchMap[batch] && batchMap[batch].length > 0)
-    .sort((a, b) => batchMap[b].length - batchMap[a].length);
+function buildRollToStudentInfo(students) {
+  const map = {};
 
-  return available.length > 0 ? available[0] : null;
+  students.forEach(s => {
+    map[s.RollNumber] = {
+      name: s.StudentName || "",
+      branch: s.Branch || "",
+      subject: s.Subject || "",
+      batch: s.Batch || "",
+      year: s.year || ""
+    };
+  });
+
+  return map;
 }
 
-function findEmptySeats(matrix) {
-  let seats = [];
-  for (let r = 0; r < matrix.length; r++) {
-    for (let c = 0; c < matrix[0].length; c++) {
-      if (!matrix[r][c]) seats.push({ row: r, col: c });
+/* ================================
+   CAPACITY
+================================ */
+function getHallCapacity(hall, isTwo) {
+  const R = Number(hall.Rows);
+  const C = Number(hall.Columns);
+
+  let cap = 0;
+
+  for (let r = 0; r < R; r++) {
+    for (let c = 0; c < C; c++) {
+
+      if (isTwo && c % 3 === 1) continue;
+
+      cap++;
     }
   }
-  return seats;
+
+  return cap;
 }
 
-function hasCollision(matrix, row, col, student) {
-  const left = col > 0 ? matrix[row][col - 1] : null;
-  const right = col < matrix[0].length - 1 ? matrix[row][col + 1] : null;
-
-  return (
-    (left && left.batch === student.batch) ||
-    (right && right.batch === student.batch)
+function calculateTotalCapacity(halls, isTwo) {
+  return halls.reduce(
+    (s, h) => s + getHallCapacity(h, isTwo),
+    0
   );
 }
 
 /* ================================
-   FIND LAST ACTIVE ROOM
+   CORE ALLOCATION (AB / BA)
 ================================ */
-function getLastActiveRoom(allocation) {
-  let roomNames = Object.keys(allocation);
-  let lastActive = null;
+function allocateHall(
+  hall,
+  groups,
+  pointers,
+  order,
+  startOffset,
+  isTwo
+) {
 
-  for (let roomName of roomNames) {
-    let matrix = allocation[roomName];
-    let hasStudent = matrix.some(row =>
-      row.some(seat => seat !== null)
-    );
+  const R = Number(hall.Rows);
+  const C = Number(hall.Columns);
 
-    if (hasStudent) {
-      lastActive = roomName;
-    }
-  }
+  const seats = Array.from({ length: R }, () => Array(C).fill(""));
+  let count = 0;
 
-  return lastActive;
-}
+  for (let r = 0; r < R; r++) {
 
-/* ================================
-   MAIN ALLOCATION
-================================ */
-function allocateSmartColumnWise(data, rooms) {
-  const batchMap = groupByBatch(data);
-  let allocation = {};
+    // Flip every row
+    const rowOffset = r % 2 === 0 ? 0 : 1;
 
-  const totalBatches = Object.keys(batchMap).length;
-  // This heuristic can be tuned. 
-  // If we have many small batches, we might want fewer selected batches per hall.
-  // Original logic: Math.ceil(totalBatches / 2)
-  const maxBatchesPerHall = Math.max(2, Math.ceil(totalBatches / 2));
+    for (let c = 0; c < C; c++) {
 
-  // We need to iterate rooms in a specific order (array order) to fill them sequentially
-  // The 'rooms' map here comes from 'halls' array iteration, but Object.entries might not guarantee order.
-  // Better to pass array of room objects.
-  // But let's follow the logic provided where 'rooms' was an object.
-  // We'll rely on the caller to provide 'rooms' or process keys.
+      if (isTwo && c % 3 === 1) continue;
 
-  for (let [roomName, roomInfo] of Object.entries(rooms)) {
-    const { row, cols } = roomInfo;
+      let logical = c;
 
-    let matrix = Array.from({ length: row }, () =>
-      Array.from({ length: cols }, () => null)
-    );
-
-    let selectedBatches = getTopNBatches(batchMap, maxBatchesPerHall);
-
-    for (let c = 0; c < cols; c++) {
-      let batch = getHighestFromSelected(batchMap, selectedBatches);
-
-      // If no batch is selected, we might want to pick a new batch from available?
-      // The original logic only picks from 'selectedBatches'.
-      // If 'selectedBatches' are exhausted, that column stays empty?
-      // Wait, 'getHighestFromSelected' picks from 'selectedBatches' which refers to 'batchMap'.
-      // Students are shifted from 'batchMap'.
-
-      if (!batch) break;
-
-      for (let r = 0; r < row; r++) {
-        if (batchMap[batch] && batchMap[batch].length > 0) {
-          matrix[r][c] = batchMap[batch].shift();
-        }
+      if (isTwo) {
+        logical = c - Math.floor(c / 3);
       }
-    }
 
-    allocation[roomName] = matrix;
-  }
+      const base =
+        (logical + rowOffset + startOffset) % order.length;
 
-  let remaining = [];
-  Object.values(batchMap).forEach(students => {
-    if (students.length > 0) remaining.push(...students);
-  });
-  return { allocation, remaining };
-}
+      for (let k = 0; k < order.length; k++) {
 
-/* ================================
-   REBALANCE
-================================ */
-function rebalanceAllocation(allocation) {
-  let roomNames = Object.keys(allocation);
-  let lastRoomName = getLastActiveRoom(allocation);
-  if (!lastRoomName) return { allocation, dropped: [] };
+        const idx = (base + k) % order.length;
+        const branch = order[idx];
 
-  let lastRoom = allocation[lastRoomName];
-  let unplaced = [];
+        if (pointers[branch] < groups[branch].length) {
 
-  let emptySeats = findEmptySeats(lastRoom);
-  let totalSeats = lastRoom.length * lastRoom[0].length;
-
-  // If partially filled
-  if (emptySeats.length > 0 && emptySeats.length !== totalSeats) {
-    for (let r = 0; r < lastRoom.length; r++) {
-      for (let c = 0; c < lastRoom[0].length; c++) {
-        if (lastRoom[r][c]) {
-          unplaced.push(lastRoom[r][c]);
-          lastRoom[r][c] = null;
-        }
-      }
-    }
-  } else {
-    // If the last room is fully filled, or empty, do nothing
-    return { allocation, dropped: [] };
-  }
-
-  // Fill in holes in logical order of rooms?
-  // Current logic iterates all rooms except last one.
-  for (let roomName of roomNames) {
-    if (roomName === lastRoomName) continue;
-    if (unplaced.length === 0) break;
-
-    let room = allocation[roomName];
-    let seats = findEmptySeats(room);
-
-    for (let seat of seats) {
-      if (unplaced.length === 0) break;
-
-      // Try to place an unplaced student here
-      for (let i = 0; i < unplaced.length; i++) {
-        let student = unplaced[i];
-        if (!hasCollision(room, seat.row, seat.col, student)) {
-          room[seat.row][seat.col] = student;
-          unplaced.splice(i, 1);
+          seats[r][c] = groups[branch][pointers[branch]++];
+          count++;
           break;
         }
       }
     }
   }
 
-  // Put remaining back into last room
-  let lastSeats = findEmptySeats(lastRoom);
-
-  for (let seat of lastSeats) {
-    if (unplaced.length === 0) break;
-
-    for (let i = 0; i < unplaced.length; i++) {
-      let student = unplaced[i];
-      if (!hasCollision(lastRoom, seat.row, seat.col, student)) {
-        lastRoom[seat.row][seat.col] = student;
-        unplaced.splice(i, 1);
-        break;
-      }
-    }
-  }
-
-  /* 
-    The logic below used to force place collisions.
-    We are removing it to respect strict "no collision" requirement.
-    The remaining unplaced are returned in `dropped`.
-  */
-  // if (unplaced.length > 0) {
-  //   lastSeats = findEmptySeats(lastRoom);
-  //   for (let seat of lastSeats) {
-  //     if (unplaced.length === 0) break;
-  //     lastRoom[seat.row][seat.col] = unplaced.shift();
-  //   }
-  // }
-
-  return { allocation, dropped: unplaced };
+  return { seats, count };
 }
 
 /* ================================
-   FIRESTORE FORMAT
+   EVALUATION (FIX SAME BRANCH)
 ================================ */
-function formatForFirestore(hall, seats) {
-  const hallData = {
-    rows: Number(hall.Rows),
-    columns: Number(hall.Columns),
-  };
+function solveAdjacencyConstraints(arr, rollToBranch) {
 
-  let seatNo = 1;
-  seats.forEach((row, r) => {
-    const arr = [];
-    row.forEach((student, c) => {
-      // If student is null, it's an empty seat
-      if (!student) return;
+  const R = arr.length;
+  const C = arr[0].length;
 
-      arr.push({
-        roll: student.RollNumber,
-        name: student.name,
-        batch: student.batch,
-        year: student.year,
-        subject: student.subject,
-        hall: hall.HallName,
-        row: r + 1,
-        bench: c + 1,
-        seat: seatNo++ // Seat number logic might need adjustment if bench/chair logic implies something else
-      });
-    });
-    // Only add row if it has students? Or keep it?
-    // Start with empty rows if needed, but Firestore typically stores populated data
-    if (arr.length) hallData[`row${r}`] = arr;
-  });
+  for (let pass = 0; pass < 40; pass++) {
 
-  return hallData;
-}
+    let ok = true;
 
-function printMatrix(allocation) {
+    for (let r = 0; r < R; r++) {
+      for (let c = 0; c < C - 1; c++) {
 
-  for (let [roomName, matrix] of Object.entries(allocation)) {
+        const a = arr[r][c];
+        const b = arr[r][c + 1];
 
-    const hasStudent = matrix.some(row =>
-      row.some(seat => seat !== null)
-    );
+        if (!a || !b) continue;
 
-    if (!hasStudent) continue;
+        if (rollToBranch[a] === rollToBranch[b]) {
 
-    console.log(`\n===== ${roomName} =====`);
+          ok = false;
 
-    matrix.forEach(row => {
-      console.log(
-        row.map(seat =>
-          seat ? seat.RollNumber : "EMPTY"
-        ).join(" | ")
-      );
-    });
-  }
-}
+          search:
+          for (let i = r; i < R; i++) {
+            for (let j = 0; j < C; j++) {
 
-/* ================================
-   API ROUTE
-================================ */
-router.post(
-  "/",
-  upload.fields([{ name: "students" }, { name: "halls" }]),
-  async (req, res) => {
-    try {
-      if (!req.files.students || !req.files.halls) {
-        return res.status(400).json({ error: "Missing files" });
-      }
+              const cand = arr[i][j];
 
-      const students = excelToCsv(fs.readFileSync(req.files.students[0].path, "utf8"));
-      const halls = excelToCsv(fs.readFileSync(req.files.halls[0].path, "utf8"));
+              if (
+                cand &&
+                rollToBranch[cand] !== rollToBranch[a]
+              ) {
 
-      // 1. Prepare rooms object for the algorithm
-      // Note: 'halls' input order is preserved.
-      // Object insertion order is generally preserved for non-integer keys in modern JS.
-      const rooms = {};
-      halls.forEach(h => {
-        rooms[h.HallName] = {
-          row: Number(h.Rows),
-          cols: Number(h.Columns)
-        };
-      });
+                arr[r][c + 1] = cand;
+                arr[i][j] = b;
 
-      // printRollNumbers(students);
-
-      // 2. Run Allocation
-      let { allocation, remaining } = allocateSmartColumnWise(students, rooms);
-      const rebalanceResult = rebalanceAllocation(allocation);
-      allocation = rebalanceResult.allocation;
-
-      // New step: Try to place remaining students into the LAST room strictly without collision
-      let allUnplaced = [...remaining, ...rebalanceResult.dropped];
-
-      if (allUnplaced.length > 0) {
-        const lastRoomName = getLastActiveRoom(allocation);
-        if (lastRoomName) {
-          const lastRoom = allocation[lastRoomName];
-          const seats = findEmptySeats(lastRoom);
-
-          for (let seat of seats) {
-            if (allUnplaced.length === 0) break;
-            // Try to find a student who fits here
-            for (let i = 0; i < allUnplaced.length; i++) {
-              let s = allUnplaced[i];
-              if (!hasCollision(lastRoom, seat.row, seat.col, s)) {
-                lastRoom[seat.row][seat.col] = s;
-                allUnplaced.splice(i, 1);
-                break;
+                break search;
               }
             }
           }
         }
       }
+    }
 
-      if (allUnplaced.length > 0) {
-        console.log("\n===== UNPLACED STUDENTS =====");
-        console.log("Total:", allUnplaced.length);
-        allUnplaced.forEach(s => console.log(` - ${s.RollNumber} (${s.batch})`));
-        console.log("=============================\n");
-      }
+    if (ok) break;
+  }
 
-      // 3. Format for Firestore
-      const firestoreHalls = {};
+  return arr;
+}
 
-      // printMatrix(allocation)
+/* ================================
+   TERMINAL PRINT
+================================ */
+function printHallAllocation(name, seats, rollToBranch) {
 
-      // Iterate over the halls to match the output allocation
-      halls.forEach(h => {
-        const roomName = h.HallName;
-        if (allocation[roomName]) {
-          firestoreHalls[roomName] = formatForFirestore(h, allocation[roomName]);
+  console.log("\n===============================");
+  console.log("Hall:", name);
+  console.log("===============================");
+
+  seats.forEach((row, i) => {
+
+    const line = row.map(s => {
+
+      if (!s) return " --- ";
+
+      return `${rollToBranch[s]}-${s}`;
+    });
+
+    console.log(`Row ${i + 1}:`, line.join(" | "));
+  });
+
+  console.log("===============================\n");
+}
+
+/* ================================
+   MAIN ENGINE
+================================ */
+function generateSeatingPlan(halls, groups, rollToBranch) {
+
+  const order = Object.keys(groups);
+
+  let pointers = {};
+  order.forEach(k => pointers[k] = 0);
+
+  const results = [];
+
+  const total = Object.values(groups)
+    .reduce((a, g) => a + g.length, 0);
+
+  const cap2 = calculateTotalCapacity(halls, true);
+
+  const globalTwo = total <= cap2;
+
+  console.log("Students:", total);
+  console.log("2 Bench Cap:", cap2);
+  console.log("Mode:", globalTwo ? "2" : "3");
+
+  /* ---------- ALLOCATION ---------- */
+
+  halls.forEach((hall, index) => {
+    const rows = Number(hall.Rows);
+    const columns = Number(hall.Columns);
+    const startObjIndex = index % order.length;
+
+    // Determine Hall Type
+    const rawType = hall.Type || hall.type || hall.Furniture || hall.furniture || hall.SeatingType || "Bench";
+    // const type = rawType.toLowerCase().includes("chair") ? "Chair" : "Bench";
+
+    const seats = Array.from({ length: rows }, () => Array(columns).fill(""));
+
+    // Column-wise filling
+    for (let c = 0; c < columns; c++) {
+
+      // If in 2-seater mode (globalTwo), skip the middle seat of a 3-seater bench (index 1, 4, 7...)
+      if (globalTwo && c % 3 === 1) continue;
+
+      // Determine logical group for this column
+      // This creates the vertical striping effect: A B C A B C...
+      let groupIndex = (startObjIndex + c) % order.length;
+
+      for (let r = 0; r < rows; r++) {
+
+        let placed = false;
+        let attempts = 0;
+        let currentKeyIndex = groupIndex;
+
+        while (attempts < order.length) {
+          const k = order[currentKeyIndex];
+
+          if (pointers[k] < groups[k].length) {
+            seats[r][c] = groups[k][pointers[k]++];
+            placed = true;
+            break;
+          }
+
+          // If preferred group empty, try next group
+          currentKeyIndex = (currentKeyIndex + 1) % order.length;
+          attempts++;
         }
-      });
-
-      console.log("Exam Name:", req.body.examName);
-
-      const doc = await db.collection("examAllocations").add({
-        name: req.body.examName,
-        sems: req.body.years,
-        isElective: req.body.type !== "Normal", // Assuming this flag mapping is correct from previous code
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        meta: {
-          totalStudents: students.length,
-          totalHalls: halls.length,
-          studentsPerBench: 1 // Single column logic usually assumes 1 per seat position
-        },
-        halls: firestoreHalls,
-        examDate: req.body.examDate
-      });
-
-      res.json({ success: true });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: err.message });
-    } finally {
-      // Cleanup uploaded files
-      if (req.files) {
-        if (req.files.students) fs.unlinkSync(req.files.students[0].path);
-        if (req.files.halls) fs.unlinkSync(req.files.halls[0].path);
       }
+    }
+
+    /* ---------- EVALUATION ---------- */
+
+    const optimizedSeats = solveAdjacencyConstraints(
+      seats,
+      rollToBranch
+    );
+
+    /* ---------- PRINT ---------- */
+
+    printHallAllocation(
+      hall.HallName,
+      optimizedSeats,
+      rollToBranch
+    );
+
+    results.push({
+      hallName: hall.HallName,
+      allocation: optimizedSeats,
+      maxBench: globalTwo ? 2 : 3
+    });
+  });
+
+  return results;
+}
+
+/* ================================
+   SAVE FIRESTORE
+================================ */
+async function saveAllocationToFirestore(
+  halls,
+  meta,
+  name,
+  sem,
+  type,
+  date,
+  mode
+) {
+
+  const ref = db.collection("examAllocations").doc();
+
+  const data = {
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    halls: {},
+    meta,
+    name,
+    sems: sem,
+    isElective: type !== "Normal",
+    examDate: date,
+    mode,
+    isPublished: false
+  };
+
+  halls.forEach(h => {
+    data.halls[h.hallName] = h.allocation;
+  });
+
+  await ref.set(data);
+
+  return ref.id;
+}
+
+/* ================================
+   FORMAT
+================================ */
+function formatForFirestore(hall, seats, info) {
+
+  const data = {
+    rows: Number(hall.Rows),
+    columns: Number(hall.Columns)
+  };
+
+  let seatNo = 1;
+
+  seats.forEach((row, r) => {
+
+    const arr = [];
+
+    row.forEach((roll, c) => {
+
+      if (!roll) return;
+
+      const i = info[roll] || {};
+
+      arr.push({
+        roll,
+        name: i.name,
+        batch: i.batch,
+        year: i.year,
+        hall: hall.HallName,
+        row: r + 1,
+        bench: c + 1,
+        seat: seatNo++
+      });
+    });
+
+    data[`row${r}`] = arr;
+  });
+
+  return data;
+}
+
+/* ================================
+   API
+================================ */
+router.post(
+  "/",
+  upload.fields([
+    { name: "students" },
+    { name: "halls" }
+  ]),
+
+  async (req, res) => {
+
+    try {
+
+      const students = excelToCsv(
+        fs.readFileSync(req.files.students[0].path, "utf8")
+      );
+
+      const halls = shuffleArray(
+        excelToCsv(
+          fs.readFileSync(req.files.halls[0].path, "utf8")
+        )
+      );
+
+      const groups = groupStudents(students);
+      const rollToBranch = buildRollToBranch(students);
+      const rollToInfo = buildRollToStudentInfo(students);
+
+      /* Generate */
+
+      const raw = generateSeatingPlan(
+        halls,
+        groups,
+        rollToBranch
+      );
+
+      /* Format */
+
+      const final = raw.map(h => {
+
+        const hall = halls.find(
+          x => x.HallName === h.hallName
+        );
+
+        return {
+          hallName: h.hallName,
+          allocation: formatForFirestore(
+            hall,
+            h.allocation,
+            rollToInfo
+          ),
+          maxBench: h.maxBench
+        };
+      });
+
+      const meta = {
+        totalStudents: students.length,
+        totalHalls: halls.length,
+        studentsPerBench: final[0]?.maxBench || 0
+      };
+
+      const id = await saveAllocationToFirestore(
+        final,
+        meta,
+        req.body.examName,
+        req.body.years,
+        req.body.type,
+        req.body.examDate,
+        req.body.mode
+      );
+
+      res.json({
+        success: true,
+        documentId: id
+      });
+
+      fs.unlinkSync(req.files.students[0].path);
+      fs.unlinkSync(req.files.halls[0].path);
+
+    } catch (e) {
+
+      console.error(e);
+
+      res.status(500).json({
+        error: e.message
+      });
     }
   }
 );
