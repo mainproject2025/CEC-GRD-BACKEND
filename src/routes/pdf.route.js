@@ -59,6 +59,56 @@ function formatWithHalfDay(dateTimeStr) {
   return `${date} ${period}`;
 }
 
+function splitIntoRanges(rolls) {
+  if (!rolls || rolls.length === 0) return [];
+
+  // Proper numeric sort
+  rolls.sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true })
+  );
+
+  const ranges = [];
+  let start = rolls[0];
+  let prev = rolls[0];
+
+  function getPrefix(roll) {
+    return roll.match(/^[A-Za-z]+/)?.[0] || "";
+  }
+
+  function getNumber(roll) {
+    return parseInt(roll.match(/\d+$/)?.[0] || 0);
+  }
+
+  for (let i = 1; i < rolls.length; i++) {
+    const current = rolls[i];
+
+    const samePrefix = getPrefix(current) === getPrefix(prev);
+    const consecutive =
+      getNumber(current) === getNumber(prev) + 1;
+
+    if (samePrefix && consecutive) {
+      prev = current;
+    } else {
+      ranges.push({
+        from: start,
+        to: prev,
+        count: getNumber(prev) - getNumber(start) + 1
+      });
+
+      start = current;
+      prev = current;
+    }
+  }
+
+  // Push last range
+  ranges.push({
+    from: start,
+    to: prev,
+    count: getNumber(prev) - getNumber(start) + 1
+  });
+
+  return ranges;
+}
 /* =========================================================
    📄 GENERATE HALL HTML
 ========================================================= */
@@ -155,226 +205,100 @@ th {
 /* ================= GRID (BIG SIZE) ================= */
 
 .grid-container {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 8px;
-  align-items: center;
-  width: 100%;
-  page-break-inside: avoid;
-}
-
-/* Row */
-
-.row-visual {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 6px;
-  align-items: center;
-  page-break-inside: avoid;
-}
-
-/* Row Label */
-
-.row-label-visual {
-  font-weight: bold;
-  width: 28px;
-  font-size: 13px;
-}
-
-/* Bench */
-
-.bench-visual {
-  border: 1.5px solid #333;
-  padding: 4px;
-  display: flex;
-  gap: 5px;
-  background: #fff;
-}
-
-/* Chair */
-
-.chair-visual {
-  border: 1.5px solid #555;
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #f8f8f8;
-  font-size: 10px;
-  border-radius: 3px;
-  flex-direction: column;
-}
-
-/* Seat */
-
-.seat-visual {
-  border: 1px dashed #aaa;
-  padding: 3px;
-  font-size: 10px;
-  min-width: 38px;
-  text-align: center;
-  background: #fff;
-}
-
-/* Empty */
-
-.empty-seat {
-  color: #bbb;
-}
-
-/* Roll */
-
-.seat-roll {
-  font-weight: bold;
-  font-size: 10px;
-  line-height: 1.1;
-}
-
-/* Year */
-
-.seat-year {
-  font-size: 9px;
-  color: #666;
-  line-height: 1;
+  margin-top: 20px;
+   
 }
 
 .direction-board {
-  width: 100%;
   text-align: center;
   font-weight: bold;
-  font-size: 15px;
-  color: white;
- 
-  border-radius: 6px;
-  letter-spacing: 1px;
- 
-  margin-bottom: 10px;
+  margin-bottom: 15px;
+  border: 2px solid black;
+  padding: 8px;
 }
+
+.row-visual {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.row-label-visual {
+  width: 30px;
+  font-weight: bold;
+  text-align: center;
+}
+
+.seat-box {
+  width: 80px;
+  height: 60px;
+  border: 2px solid black;
+  margin-right: 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  font-size: 11px;
+}
+
+.empty-seat {
+  background: #f5f5f5;
+  color: #999;
+}
+
+.seat-roll {
+  font-weight: bold;
+}
+
+.seat-year {
+  font-size: 10px;
+}
+
 
 </style>
 </head>
 
 <body>
-
-<h2>College of Engineering Chengannur</h2>
-<h2>First Series Examination Feb26</h2>
-<h2>Hall Seating Arrangement (${hallType})</h2>
-<h2>${hallName}</h2>
-<h5>Exam Date: ${formatWithHalfDay(date)}</h5>
 `;
 
     /* ================= SEATING LIST ================= */
 
-    for (const year of Object.keys(yearMap).sort()) {
-      html += `
-<h3>Year: ${year}</h3>
-
-<table>
-<tr>
-  <th>Sl</th>
-  <th>Name</th>
-  <th>Roll</th>
-  <th>Seat</th>
-</tr>
-`;
-
-      yearMap[year].forEach((s, i) => {
-        html += `
-<tr>
-  <td>${i + 1}</td>
-  <td>${s.name}</td>
-  <td>${s.roll}</td>
-  <td>${s.seatLabel} (R${s.row})</td>
-</tr>
-`;
-      });
-
-      html += `</table>`;
-    }
 
     /* ================= GRID ================= */
 
     html += `
-<div class="page-break"></div>
 
 <h2>Seating Grid [${hallName}]</h2>
 <h5>Exam Date: ${formatWithHalfDay(date)}</h5>
 
 <div class="grid-container">
-<div class="direction-board">
-⬆ ALL EYES THIS WAY ⬆
-</div>
-
+  <div style="text-align: center; font-weight: bold; margin-bottom: 15px; padding: 8px;">
+    Black Board
+  </div>
 `;
 
     rows.forEach((row, r) => {
       html += `<div class="row-visual">`;
 
-      const rowLabel = 1 + r;
+      const rowLabel = r + 1;
 
       html += `<div class="row-label-visual">${rowLabel}</div>`;
 
-      /* BENCH MODE */
+      row.forEach((seatData) => {
+        const student = seatData && seatData.length ? seatData[0] : null;
 
-      if (hallType === "Bench") {
-        const benchCount = Math.ceil(row.length / 3);
+        html += `<div class="seat-box ${student ? "" : "empty-seat"}">`;
 
-        for (let b = 0; b < benchCount; b++) {
-          html += `<div class="bench-visual">`;
-
-          for (let k = 0; k < 3; k++) {
-            const colIdx = b * 3 + k;
-
-            if (colIdx >= row.length) break;
-
-            const seatData = row[colIdx];
-            const student =
-              seatData && seatData.length ? seatData[0] : null;
-
-            html += `<div class="seat-visual ${student ? "" : "empty-seat"
-              }">`;
-
-            if (student) {
-              html += `
-<span class="seat-roll">${student.RollNumber || "?"}</span>
-<span class="seat-year">${student.year}</span>
-`;
-            } else {
-              html += "Empty";
-            }
-
-            html += `</div>`;
-          }
-
-          html += `</div>`;
+        if (student) {
+          html += `
+        <span class="seat-roll">${student.RollNumber || "?"}</span>
+      `;
+        } else {
+          html += `Empty`;
         }
 
-      }
-
-      /* CHAIR MODE */
-
-      else {
-        row.forEach((seatData) => {
-          const student =
-            seatData && seatData.length ? seatData[0] : null;
-
-          html += `<div class="chair-visual ${student ? "" : "empty-seat"
-            }">`;
-
-          if (student) {
-            html += `
-<span class="seat-roll">${student.RollNumber || "?"}</span>
-<span class="seat-year">${student.year}</span>
-`;
-          } else {
-            html += "Empty";
-          }
-
-          html += `</div>`;
-        });
-      }
+        html += `</div>`;
+      });
 
       html += `</div>`;
     });
@@ -383,18 +307,16 @@ th {
 </div>
 `;
 
-    /* ================= ATTENDANCE ================= */
 
+    /* ================= ATTENDANCE ================= */
     html += `
 <div class="page-break"></div>
 
-<h2>Attendance Sheet</h2>
+<h2>Attendance Sheet [${hallName}]</h2>
 <h5>Exam Date: ${formatWithHalfDay(date)}</h5>
-
-<h2>${hallName}</h2>
 `;
+    for (const year of Object.keys(yearMap).sort((a, b) => a - b)) {
 
-    for (const year of Object.keys(yearMap).sort()) {
       html += `
 <h3>Year: ${year}</h3>
 
@@ -407,7 +329,37 @@ th {
 </tr>
 `;
 
-      yearMap[year].forEach((s, i) => {
+      // 🔥 Strict Roll Number Sorting
+      const sortedStudents = [...yearMap[year]].sort((a, b) => {
+
+        const regex = /^([A-Z]+\d+)([A-Z])(\d+)$/;
+
+        const matchA = a.roll.match(regex);
+        const matchB = b.roll.match(regex);
+
+        // Fallback if pattern doesn't match
+        if (!matchA || !matchB) {
+          return a.roll.localeCompare(b.roll, undefined, { numeric: true });
+        }
+
+        const [, prefixA, batchA, numA] = matchA;
+        const [, prefixB, batchB, numB] = matchB;
+
+        // 1️⃣ Compare prefix (EC24 etc)
+        if (prefixA !== prefixB) {
+          return prefixA.localeCompare(prefixB);
+        }
+
+        // 2️⃣ Compare batch letter (A before B)
+        if (batchA !== batchB) {
+          return batchA.localeCompare(batchB);
+        }
+
+        // 3️⃣ Compare numeric part
+        return Number(numA) - Number(numB);
+      });
+
+      sortedStudents.forEach((s, i) => {
         html += `
 <tr>
   <td>${i + 1}</td>
@@ -421,11 +373,26 @@ th {
       html += `</table>`;
     }
 
-    /* CLOSE */
-
     html += `
-</body>
-</html>
+  <br><br>
+  <table style="width:100%; margin-bottom:20px;">
+    <tr>
+      <th style="text-align:left;">Absentees (Roll Numbers)</th>
+    </tr>
+    <tr>
+      <td style="height:60px;"></td>
+    </tr>
+  </table>
+  <table style="width:100%; border:none; margin-top:40px;">
+    <tr style="border:none;">
+      <td style="border:none; width:50%; text-align:left;">
+        Name of Invigilator: ______________________________
+      </td>
+      <td style="border:none; width:50%; text-align:right;">
+        Signature: ______________________________
+      </td>
+    </tr>
+  </table>
 `;
 
     hallHTMLs[hallName] = html;
@@ -437,21 +404,242 @@ th {
 /* =========================================================
    📊 GENERATE SUMMARY HTML
 ========================================================= */
+/* =========================================================
+   📊 GENERATE SUMMARY HTML
+========================================================= */
+
+function compressRollNumbers(rolls) {
+  if (!rolls || rolls.length === 0) return "";
+
+  // Sort properly (numeric aware)
+  rolls.sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true })
+  );
+
+  const ranges = [];
+  let start = rolls[0];
+  let prev = rolls[0];
+
+  function getPrefix(roll) {
+    return roll.match(/^[A-Za-z]+/)?.[0] || "";
+  }
+
+  function getNumber(roll) {
+    return parseInt(roll.match(/\d+$/)?.[0] || 0);
+  }
+
+  for (let i = 1; i < rolls.length; i++) {
+    const current = rolls[i];
+
+    const samePrefix = getPrefix(current) === getPrefix(prev);
+    const consecutive =
+      getNumber(current) === getNumber(prev) + 1;
+
+    if (samePrefix && consecutive) {
+      prev = current;
+    } else {
+      if (start === prev) {
+        ranges.push(start);
+      } else {
+        ranges.push(`${start} - ${prev}`);
+      }
+      start = current;
+      prev = current;
+    }
+  }
+
+  // Push last range
+  if (start === prev) {
+    ranges.push(start);
+  } else {
+    ranges.push(`${start} - ${prev}`);
+  }
+
+  return ranges.join(", ");
+}
+
+function getBranchFromRoll(roll) {
+  const match = roll.match(/^([A-Z]+)/);
+  return match ? match[1] : "Other";
+}
+
 function generateSummaryHTML(allocation, date) {
+
   let html = `
   <style>
+    body { 
+      font-family: "Times New Roman", serif; 
+      font-size: 14px; 
+    }
+
+    .main-header {
+      border: 2px solid #000;
+      padding: 10px;
+      text-align: center;
+      margin-bottom: 15px;
+    }
+
+    .summary-table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 2px solid #000;
+    }
+
+    .summary-table th, 
+    .summary-table td {
+      border: 1px solid #000;
+      padding: 6px 8px;
+      text-align: center;
+    }
+
+    .branch-header {
+      font-weight: bold;
+    }
+
+    h2, h3, h5 {
+      margin: 3px 0;
+    }
+    
+    td{
+      border: 1px solid #000;
+      font-weight: bold;
+    }
+  </style>
+
+  <div class="main-header">
+    <h2>College of Engineering Chengannur</h2>
+    <h5>(Managed by IHRD, A Govt of Kerala Undertaking)</h5>
+    <h3>
+      First Internal Examination – 
+      ${new Date(date).toLocaleString('default', { month: 'long', year: 'numeric' }).toUpperCase()}
+    </h3>
+
+    <div style="display:flex; justify-content:center; align-items:center; margin-top:10px; font-weight:bold; gap:10px;">
+      <span style="text-align:center; font-size:20px; font-weight:bold;">S2</span>
+      <span style="text-align:center; font-size:16px;">${formatWithHalfDay(date)}</span>
+    </div>
+  </div>
+
+  <table class="summary-table">
+  `;
+
+  // ==========================
+  // 1️⃣ Flatten Data
+  // ==========================
+  const allStudents = [];
+
+  Object.entries(allocation).forEach(([hallName, rows]) => {
+    rows.forEach(row => {
+      row.forEach(bench => {
+        bench.forEach(s => {
+          if (!s) return;
+          allStudents.push({
+            roll: s.RollNumber,
+            hall: hallName,
+            branch: getBranchFromRoll(s.RollNumber)
+          });
+        });
+      });
+    });
+  });
+
+  // ==========================
+  // 2️⃣ Sort by Branch → Roll
+  // ==========================
+  allStudents.sort((a, b) => {
+    if (a.branch !== b.branch)
+      return a.branch.localeCompare(b.branch);
+
+    return a.roll.localeCompare(b.roll, undefined, { numeric: true });
+  });
+
+  // ==========================
+  // 3️⃣ Group by Branch → Hall Ranges
+  // ==========================
+  const branchSegments = {};
+
+  if (allStudents.length > 0) {
+    let currentBranch = allStudents[0].branch;
+    let currentHall = allStudents[0].hall;
+    let startRoll = allStudents[0].roll;
+    let endRoll = allStudents[0].roll;
+
+    const pushSegment = (branch, start, end, hall) => {
+      if (!branchSegments[branch]) branchSegments[branch] = [];
+      const range = start === end ? start : `${start}-${end}`;
+      branchSegments[branch].push({ range, hall });
+    };
+
+    for (let i = 1; i < allStudents.length; i++) {
+      const s = allStudents[i];
+
+      if (s.branch === currentBranch && s.hall === currentHall) {
+        endRoll = s.roll;
+      } else {
+        pushSegment(currentBranch, startRoll, endRoll, currentHall);
+        currentBranch = s.branch;
+        currentHall = s.hall;
+        startRoll = s.roll;
+        endRoll = s.roll;
+      }
+    }
+
+    pushSegment(currentBranch, startRoll, endRoll, currentHall);
+  }
+
+  // ==========================
+  // 4️⃣ Render Table
+  // ==========================
+  Object.keys(branchSegments).sort().forEach(branch => {
+
+    html += `
+      <tr>
+        <th colspan="4" class="branch-header">${branch}</th>
+      </tr>
+      <tr>
+        <th>Roll No.</th>
+        <th>Class Room</th>
+        <th>Roll No.</th>
+        <th>Class Room</th>
+      </tr>
+    `;
+
+    const segments = branchSegments[branch];
+
+    for (let i = 0; i < segments.length; i += 2) {
+      const seg1 = segments[i];
+      const seg2 = segments[i + 1];
+
+      html += `<tr>`;
+
+      html += `<td>${seg1.range}</td><td>${seg1.hall}</td>`;
+
+      if (seg2) {
+        html += `<td>${seg2.range}</td><td>${seg2.hall}</td>`;
+      } else {
+        html += `<td></td><td></td>`;
+      }
+
+      html += `</tr>`;
+    }
+  });
+
+  html += `</table>`;
+
+  html += `
+  <style>
     body { font-family: Arial; font-size: 14px; }
-    table { width:100%; border-collapse: collapse; }
+    table { width:100%; border-collapse: collapse; margin-bottom:25px; }
     th,td { border:1px solid #000; padding:6px; }
     th { background:#eee; }
   </style>
   <h1>College of Engineering Chengannur</h1>
-  <h1 style="text-align:center">Hall Allocation Summary </h1><h6>Date:${formatWithHalfDay(
-    date,
-  )}</h6>
+  <h1 style="text-align:center">Hall Allocation Summary</h1>
+  <h6>Date: ${formatWithHalfDay(date)}</h6>
   `;
 
   for (const [hall, rows] of Object.entries(allocation)) {
+
     const map = {};
 
     rows.forEach((row) =>
@@ -478,27 +666,78 @@ function generateSummaryHTML(allocation, date) {
         <th>Absentees</th>
       </tr>`;
 
-    Object.entries(map).forEach(([year, batches]) =>
+    Object.entries(map).forEach(([year, batches]) => {
       Object.entries(batches).forEach(([batch, rolls]) => {
-        rolls.sort();
 
-        html += `
-        <tr>
-          <td>${year}</td>
-          <td>${batch}</td>
-          <td>${rolls[0]}</td>
-          <td>${rolls[rolls.length - 1]}</td>
-          <td>${rolls.length}</td>
-          <td></td>
-        </tr>
-      `;
-      }),
-    );
+        const ranges = splitIntoRanges(rolls);
+
+        ranges.forEach(range => {
+          html += `
+            <tr>
+              <td>${year}</td>
+              <td>${batch}</td>
+              <td>${range.from}</td>
+              <td>${range.to}</td>
+              <td>${range.count}</td>
+              <td></td>
+            </tr>
+          `;
+        });
+
+      });
+    });
 
     html += "</table>";
   }
+  
   return html;
 }
+
+
+/* =========================================================
+   📊 GENERATE SUMMARY HTML
+========================================================= */
+function getRanges(rolls) {
+  if (!rolls || rolls.length === 0) return "";
+
+  // Natural sort
+  const sorted = [...rolls].sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true })
+  );
+
+  const ranges = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+
+  const getNum = (s) => {
+    const match = s.match(/(\d+)$/);
+    return match ? parseInt(match[1], 10) : null;
+  };
+
+  const getPrefix = (s) => {
+    const match = s.match(/^(.*?)(\d+)$/);
+    return match ? match[1] : s;
+  };
+
+  for (let i = 1; i < sorted.length; i++) {
+    const curr = sorted[i];
+    const prevNum = getNum(prev);
+    const currNum = getNum(curr);
+    const prevPrefix = getPrefix(prev);
+    const currPrefix = getPrefix(curr);
+
+    if (prevNum !== null && currNum !== null && prevPrefix === currPrefix && currNum === prevNum + 1) {
+      prev = curr;
+    } else {
+      ranges.push(start === prev ? start : `${start}-${prev}`);
+      start = curr;
+      prev = curr;
+    }
+  }
+  ranges.push(start === prev ? start : `${start}-${prev}`);
+  return ranges.join(", ");
+}
+
 
 /* =========================================================
    🚀 ROUTE: CACHE → GENERATE → STORE → RETURN
@@ -538,11 +777,11 @@ router.post("/", async (req, res) => {
     /* =====================================
        ⚡ GENERATE NEW
     ===================================== */
-    console.log("⚡ Generating new HTML");
+    console.log("⚡ Generating new HTML1");
 
     const allocation = reconstructAllocation(data.halls);
 
-    const roomHTMLs = generateHallHTML(allocation,data.examDate);
+    const roomHTMLs = generateHallHTML(allocation, data.examDate);
     const summaryHTML = generateSummaryHTML(allocation, data.examDate);
 
     /* =====================================
