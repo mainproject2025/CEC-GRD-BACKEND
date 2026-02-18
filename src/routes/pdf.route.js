@@ -268,7 +268,7 @@ th {
 
     html += `
 
-<h2>Seating Grid [${hallName}]</h2>
+<h2>Seating Grid [${hallName}] <h6>generated using CEC-GRID</h6></h2>
 <h5>Exam Date: ${formatWithHalfDay(date)}</h5>
 
 <div class="grid-container">
@@ -509,6 +509,7 @@ function generateSummaryHTML(allocation, date) {
   <div class="main-header">
     <h2>College of Engineering Chengannur</h2>
     <h5>(Managed by IHRD, A Govt of Kerala Undertaking)</h5>
+    <h5>Generated using CEC-GRID</h5>
     <h3>
       First Internal Examination – 
       ${new Date(date)
