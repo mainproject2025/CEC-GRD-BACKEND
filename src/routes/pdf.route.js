@@ -268,7 +268,7 @@ th {
 
     html += `
 
-<h2>Seating Grid [${hallName}] <h6>generated using CEC-GRID</h6></h2>
+<h2>Seating Grid [${hallName}]</h2>
 <h5>Exam Date: ${formatWithHalfDay(date)}</h5>
 
 <div class="grid-container">
