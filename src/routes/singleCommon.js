@@ -97,12 +97,19 @@ function getTopNBatches(batchMap, n) {
     .map(([batch]) => batch);
 }
 
-function getHighestFromSelected(batchMap, selectedBatches) {
+function getHighestFromSelected(batchMap, selectedBatches, lastBatch = null) {
   let available = selectedBatches
     .filter(batch => batchMap[batch] && batchMap[batch].length > 0)
     .sort((a, b) => batchMap[b].length - batchMap[a].length);
 
-  return available.length > 0 ? available[0] : null;
+  if (available.length === 0) return null;
+
+  // prioritize picking a different batch than lastBatch if possible
+  if (lastBatch && available[0] === lastBatch && available.length > 1) {
+    return available[1];
+  }
+
+  return available[0];
 }
 
 function findEmptySeats(matrix) {
@@ -115,14 +122,41 @@ function findEmptySeats(matrix) {
   return seats;
 }
 
+// Helper to check if batch name indicates a specific section/group
+// We assume the batch string like "EC25A" contains the section 'A'.
+function getSection(batch) {
+  if (!batch) return "";
+  // Return the last character or check for includes?
+  // Based on logs: "EC25A", "CS25C".
+  // Let's assume the presence of the letter determines the section.
+  return batch.toUpperCase();
+}
+
 function hasCollision(matrix, row, col, student) {
   const left = col > 0 ? matrix[row][col - 1] : null;
   const right = col < matrix[0].length - 1 ? matrix[row][col + 1] : null;
 
-  return (
-    (left && left.batch === student.batch) ||
-    (right && right.batch === student.batch)
-  );
+  // 1. Same batch collision (existing logic)
+  if ((left && left.batch === student.batch) || (right && right.batch === student.batch)) {
+    return true;
+  }
+
+  // 2. "A" batch near (C, D, E, G) constraint
+  const studentSec = getSection(student.batch);
+  const isA = studentSec.includes("A");
+  const isForbidden = (str) => ["C", "D", "E", "G"].some(char => str.includes(char));
+
+  const checkNeighbor = (neighbor) => {
+    if (!neighbor) return false;
+    const neighborSec = getSection(neighbor.batch);
+    // If student is A, neighbor cannot be C, D, E, G
+    if (isA && isForbidden(neighborSec)) return true;
+    // If neighbor is A, student cannot be C, D, E, G
+    if (neighborSec.includes("A") && isForbidden(studentSec)) return true;
+    return false;
+  };
+
+  return checkNeighbor(left) || checkNeighbor(right);
 }
 
 /* ================================
@@ -157,7 +191,7 @@ function allocateSmartColumnWise(data, rooms) {
   // This heuristic can be tuned. 
   // If we have many small batches, we might want fewer selected batches per hall.
   // Original logic: Math.ceil(totalBatches / 2)
-  const maxBatchesPerHall = Math.max(2, Math.ceil(totalBatches / 2));
+  const maxBatchesPerHall = Math.ceil(totalBatches / 2);
 
   // We need to iterate rooms in a specific order (array order) to fill them sequentially
   // The 'rooms' map here comes from 'halls' array iteration, but Object.entries might not guarantee order.
@@ -165,7 +199,10 @@ function allocateSmartColumnWise(data, rooms) {
   // But let's follow the logic provided where 'rooms' was an object.
   // We'll rely on the caller to provide 'rooms' or process keys.
 
-  for (let [roomName, roomInfo] of Object.entries(rooms)) {
+  // If rooms is a Map, we can iterate directly. If it's an object, we use Object.entries.
+  const roomEntries = (rooms instanceof Map) ? rooms.entries() : Object.entries(rooms);
+
+  for (let [roomName, roomInfo] of roomEntries) {
     const { row, cols } = roomInfo;
 
     let matrix = Array.from({ length: row }, () =>
@@ -174,8 +211,12 @@ function allocateSmartColumnWise(data, rooms) {
 
     let selectedBatches = getTopNBatches(batchMap, maxBatchesPerHall);
 
+    let lastBatch = null;
+
     for (let c = 0; c < cols; c++) {
-      let batch = getHighestFromSelected(batchMap, selectedBatches);
+      let batch = getHighestFromSelected(batchMap, selectedBatches, lastBatch);
+
+      if (batch) lastBatch = batch;
 
       // If no batch is selected, we might want to pick a new batch from available?
       // The original logic only picks from 'selectedBatches'.
@@ -364,14 +405,16 @@ router.post(
       // 1. Prepare rooms object for the algorithm
       // Note: 'halls' input order is preserved.
       // Object insertion order is generally preserved for non-integer keys in modern JS.
-      const rooms = {};
+      const rooms = new Map();
+
       halls.forEach(h => {
-        rooms[h.HallName] = {
+        rooms.set(h.HallName, {
           row: Number(h.Rows),
           cols: Number(h.Columns)
-        };
+        });
       });
 
+      console.log(rooms);
       // printRollNumbers(students);
 
       // 2. Run Allocation
@@ -379,22 +422,26 @@ router.post(
       const rebalanceResult = rebalanceAllocation(allocation);
       allocation = rebalanceResult.allocation;
 
-      // New step: Try to place remaining students into the LAST room strictly without collision
+      // New step: Try to place remaining students into ANY room strictly without collision
       let allUnplaced = [...remaining, ...rebalanceResult.dropped];
 
       if (allUnplaced.length > 0) {
-        const lastRoomName = getLastActiveRoom(allocation);
-        if (lastRoomName) {
-          const lastRoom = allocation[lastRoomName];
-          const seats = findEmptySeats(lastRoom);
+        // Iterate all rooms in order
+        // allocation keys are roomNames, in the order of insertion (which matches hall order)
+        for (let [roomName, matrix] of Object.entries(allocation)) {
+          if (allUnplaced.length === 0) break;
+
+          const seats = findEmptySeats(matrix);
+          if (seats.length === 0) continue;
 
           for (let seat of seats) {
             if (allUnplaced.length === 0) break;
+
             // Try to find a student who fits here
             for (let i = 0; i < allUnplaced.length; i++) {
               let s = allUnplaced[i];
-              if (!hasCollision(lastRoom, seat.row, seat.col, s)) {
-                lastRoom[seat.row][seat.col] = s;
+              if (!hasCollision(matrix, seat.row, seat.col, s)) {
+                matrix[seat.row][seat.col] = s;
                 allUnplaced.splice(i, 1);
                 break;
               }
@@ -426,7 +473,7 @@ router.post(
 
       console.log("Exam Name:", req.body.examName);
       console.log(req.body.type);
-      
+
       const doc = await db.collection("examAllocations").add({
         name: req.body.examName,
         sems: req.body.years,
