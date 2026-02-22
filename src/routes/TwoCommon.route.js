@@ -448,29 +448,29 @@ router.post(
       const types = req.body.type;
       const examDate = req.body.examDate;
 
-      // await db
-      //   .collection("examAllocations")
-      //   .add({
-      //     meta: {
-      //       totalStudents: merged.length,
-      //       method: "AB Column-wise Subject Grouped",
-      //     },
+      await db
+        .collection("examAllocations")
+        .add({
+          meta: {
+            totalStudents: merged.length,
+            method: "AB Column-wise Subject Grouped",
+          },
 
-      //     halls:
-      //       serializeAllocationForFirestore(
-      //         allocation
-      //       ),
+          halls:
+            serializeAllocationForFirestore(
+              allocation
+            ),
 
-      //     createdAt:
-      //       admin.firestore.FieldValue.serverTimestamp(),
+          createdAt:
+            admin.firestore.FieldValue.serverTimestamp(),
 
-      //     name,
-      //     sems,
+          name,
+          sems,
 
-      //     isElective: types !== "Normal",
+          isElective: types !== "Normal",
 
-      //     examDate,
-      //   });
+          examDate,
+        });
 
       res.json({
         success: true,
