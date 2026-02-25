@@ -10,7 +10,9 @@
     "dev": "nodemon src/server.js"
   },
   "dependencies": {
+    "@emailjs/nodejs": "^5.0.2",
     "archiver": "^7.0.1",
+    "axios": "^1.13.5",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
     "dotenv": "^16.0.3",
