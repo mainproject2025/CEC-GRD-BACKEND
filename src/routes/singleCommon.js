@@ -366,19 +366,19 @@ router.post(
 
       console.log(req.body.examDate);
 
-      // const doc = await db.collection("examAllocations").add({
-      //   name: req.body.examName,
-      //   sems: req.body.years,
-      //   isElective: req.body.type !== "Normal",
-      //   createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      //   meta: {
-      //     totalStudents: students.length,
-      //     totalHalls: halls.length,
-      //     studentsPerBench: raw[0]?.maxBench || 0
-      //   },
-      //   halls: firestoreHalls,
-      //   examDate: req.body.examDate
-      // });
+      const doc = await db.collection("examAllocations").add({
+       name: req.body.examName,
+      sems: req.body.years,
+      isElective: req.body.type !== "Normal",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      meta: {
+           totalStudents: students.length,
+           totalHalls: halls.length,
+           studentsPerBench: raw[0]?.maxBench || 0
+         },
+         halls: firestoreHalls,
+         examDate: req.body.examDate
+       });
 
       res.json({ success: true});
     } catch (err) {
