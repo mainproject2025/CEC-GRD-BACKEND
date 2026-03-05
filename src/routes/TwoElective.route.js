@@ -9,7 +9,7 @@ const upload = multer({ dest: "uploads/" });
 
 const { admin, db } = require("../config/firebase");
 
-const StudYear = {}
+
 /* ================================
    CSV PARSER
 ================================ */
@@ -25,166 +25,245 @@ const parseCSV = (filePath) =>
   });
 
 /* ================================
-   GROUP BY YEAR + SUBJECT
+   BUILD SUBJECT GROUPS FROM REMAINING STUDENTS
+   (used after one year is exhausted)
 ================================ */
-function groupByYearAndSubject(students) {
-  const result = {
-    A: {},
-    B: {},
-  };
-
+function buildSubjectGroups(students) {
+  const map = {};
   students.forEach((s) => {
-    const year = s.year;
-    const subject = s.subject;
+    const subj = s.subject || "Unknown";
+    if (!map[subj]) map[subj] = [];
+    map[subj].push(s);
+  });
+  return map;
+}
 
-    if (!result[year][subject]) {
-      result[year][subject] = [];
+/* ================================
+   FIX SAME-SUBJECT ADJACENCY (horizontal)
+   After filling a hall, scan every row for adjacent seats sharing
+   the same subject, then swap one of them with another cell that
+   has a different subject. Repeats up to 100 passes until clean.
+================================ */
+function fixSameSubjectAdjacency(matrix) {
+  const R = matrix.length;
+  const C = matrix[0].length;
+  const getSubj = (cell) => (cell && cell.length ? (cell[0].subject || null) : null);
+
+  for (let pass = 0; pass < 100; pass++) {
+    let clean = true;
+
+    for (let r = 0; r < R; r++) {
+      for (let c = 0; c < C - 1; c++) {
+        const sA = getSubj(matrix[r][c]);
+        const sB = getSubj(matrix[r][c + 1]);
+        if (!sA || !sB || sA !== sB) continue;
+
+        // Found adjacency violation — find a swap candidate
+        clean = false;
+        search:
+        for (let i = 0; i < R; i++) {
+          for (let j = 0; j < C; j++) {
+            if (i === r && (j === c || j === c + 1)) continue;
+            const sX = getSubj(matrix[i][j]);
+            if (!sX || sX === sA) continue;
+            // Avoid creating a new violation on the right of (r, c+1)
+            const sRight = (c + 2 < C) ? getSubj(matrix[r][c + 2]) : null;
+            if (sRight && sX === sRight) continue;
+            [matrix[r][c + 1], matrix[i][j]] = [matrix[i][j], matrix[r][c + 1]];
+            break search;
+          }
+        }
+      }
     }
 
-    result[year][subject].push(s);
-  });
-
-  return result;
+    if (clean) break;
+  }
+  return matrix;
 }
 
 /* ================================
-   BUILD SUBJECT ORDERED LIST
-================================ */
-function buildOrderedList(grouped) {
-  const subjects = new Set([
-    ...Object.keys(grouped.A),
-    ...Object.keys(grouped.B),
-  ]);
+   COLUMN-WISE ALLOCATION
 
-  const ordered = [];
+   Phase 1 – Both years have students:
+     Alternate columns: dominant year → other year → dominant → …
+     Each column is filled top-to-bottom with that year's students.
 
-  subjects.forEach((sub) => {
-    if (grouped.A[sub]) ordered.push(...grouped.A[sub]);
-    if (grouped.B[sub]) ordered.push(...grouped.B[sub]);
-  });
-
-  return ordered;
-}
-
-/* ================================
-   COLUMN-WISE AB ALLOCATION
+   Phase 2 – One year exhausted:
+     Group remaining students by subject.
+     Each column is assigned to the subject with the most remaining
+     students (picking a different subject each column, same logic
+     as singleExam).
 ================================ */
 function allocateColumnWiseAB(students, hallsData) {
 
+  // Separate by year
   const A = students.filter((s) => s.year === "A");
   const B = students.filter((s) => s.year === "B");
 
-  let aIndex = 0;
-  let bIndex = 0;
+  // ── Group by subject within each year first ──────────────────────────────
+  // Sort each year's list by subject so all students of the same subject
+  // are contiguous. This way each column filling naturally stays within
+  // one subject cohort instead of randomly mixing subjects mid-column.
+  const bySubject = (a, b) =>
+    (a.subject || "").localeCompare(b.subject || "");
+  A.sort(bySubject);
+  B.sort(bySubject);
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // Determine dominant (more students) vs other year
+  const dominant = A.length >= B.length ? "A" : "B";
+  const dominantArr = dominant === "A" ? A : B;
+  const otherArr = dominant === "A" ? B : A;
+
+  // Mutable pointers — shared across all halls
+  let dominantIdx = 0;
+  let otherIdx = 0;
+
+  // Phase 2 state — hoisted outside forEach so it persists across halls.
+  // If Phase 2 activates mid-hall, these survive into the next hall's
+  // columns so no student is silently dropped.
+  let subjectGroups = null;   // { subjectName: [student, …] }
+  let subjectPointers = null;   // { subjectName: number }
+  let prevSubjectKey = null;   // avoid same subject in back-to-back columns
 
   const allocation = {};
   const report = [];
 
-  hallsData.forEach((hall, hallIndex) => {
-
+  hallsData.forEach((hall) => {
     const rows = Number(hall.Rows);
     const columns = Number(hall.Columns);
     let hallPlacedCount = 0;
 
-    // Determine Hall Type (Bench vs Chair) from possible CSV headers
-    // Default to Bench if not explicitly "Chair"
-    const rawType = hall.Type || hall.type || hall.Furniture || hall.furniture || hall.SeatingType || "Bench";
-    const type = rawType.toLowerCase().includes("chair") ? "Chair" : "Bench";
-
+    // Build empty matrix  [row][col] = [ student ] or []
     const matrix = Array.from({ length: rows }, () =>
       Array.from({ length: columns }, () => [])
     );
 
-    const remainingA = A.length - aIndex;
-    const remainingB = B.length - bIndex;
-    const higherYear = remainingA >= remainingB ? "A" : "B";
-    const lowerYear = remainingA >= remainingB ? "B" : "A";
-
-    // Column-wise filling
     for (let col = 0; col < columns; col++) {
-      for (let row = 0; row < rows; row++) {
 
-        let targetYear = null;
+      const domExhausted = dominantIdx >= dominantArr.length;
+      const otherExhausted = otherIdx >= otherArr.length;
 
-        const aExhausted = aIndex >= A.length;
-        const bExhausted = bIndex >= B.length;
+      /* ---- PHASE 1: both years still have students ---- */
+      if (!domExhausted && !otherExhausted) {
 
-        // Override if one year exhausted
-        if (aExhausted && !bExhausted) {
-          // Only B remains -> Alternate columns
-          let leftIsB = false;
-          if (col > 0) {
-            const prev = matrix[row][col - 1];
-            if (prev && prev.length > 0 && prev[0].year === "B") {
-              leftIsB = true;
-            }
-          }
-          targetYear = leftIsB ? null : "B";
-        } else if (!aExhausted && bExhausted) {
-          // Only A remains -> Alternate columns
-          let leftIsA = false;
-          if (col > 0) {
-            const prev = matrix[row][col - 1];
-            if (prev && prev.length > 0 && prev[0].year === "A") {
-              leftIsA = true;
-            }
-          }
-          targetYear = leftIsA ? null : "A";
-        } else if (!aExhausted && !bExhausted) {
-          if (type === "Bench") {
-            // BENCH PATTERN
-            const patternIndex = col % 3; // 0, 1, 2
+        // Alternate: even columns → dominant, odd columns → other
+        const isEvenCol = col % 2 === 0;
+        const arr = isEvenCol ? dominantArr : otherArr;
+        const idxRef = isEvenCol
+          ? { get: () => dominantIdx, inc: () => { dominantIdx++; } }
+          : { get: () => otherIdx, inc: () => { otherIdx++; } };
 
-            if (patternIndex === 0 || patternIndex === 2) {
-              targetYear = higherYear;
-            } else {
-              targetYear = lowerYear;
-            }
-          } else {
-            // CHAIR PATTERN
-            const patternIndex = col % 2; // 0, 1
-
-            if (patternIndex === 0) {
-              targetYear = higherYear;
-            } else {
-              targetYear = lowerYear;
-            }
+        for (let row = 0; row < rows; row++) {
+          if (idxRef.get() < arr.length) {
+            matrix[row][col] = [arr[idxRef.get()]];
+            idxRef.inc();
+            hallPlacedCount++;
           }
         }
 
-        // Try to place student of targetYear
-        let student = null;
+        /* ---- PHASE 2: one year exhausted – subject-based fill ---- */
+      } else {
 
-        if (targetYear === "A") {
-          if (aIndex < A.length) {
-            student = A[aIndex++];
-          }
-          // Strict pattern: if A is exhausted, we do NOT fill with B here to maintain pattern
-        } else if (targetYear === "B") {
-          if (bIndex < B.length) {
-            student = B[bIndex++];
+        // Build subject groups ONCE from ALL remaining students.
+        // After this both pointer arrays are marked fully consumed
+        // so we never double-count.
+        if (!subjectGroups) {
+          const remaining = [
+            ...dominantArr.slice(dominantIdx),
+            ...otherArr.slice(otherIdx),
+          ];
+          dominantIdx = dominantArr.length;
+          otherIdx = otherArr.length;
+
+          subjectGroups = buildSubjectGroups(remaining);
+          subjectPointers = Object.fromEntries(
+            Object.keys(subjectGroups).map((k) => [k, 0])
+          );
+        }
+
+        // Pick the subject with the most remaining students
+        // (prefer a different subject from the previous column)
+        let bestSubject = null;
+        let maxRemaining = 0;
+
+        for (const [subj, arr] of Object.entries(subjectGroups)) {
+          const rem = arr.length - subjectPointers[subj];
+          if (rem > maxRemaining && subj !== prevSubjectKey) {
+            maxRemaining = rem;
+            bestSubject = subj;
           }
         }
 
-        if (student) {
-          matrix[row][col] = [student];
-          hallPlacedCount++;
+        // If the only subject left is the same as the previous column,
+        // SKIP this column (leave it empty) and reset prevSubjectKey.
+        // Next column will then be allowed to use it — creating an
+        // interleaved pattern:  SubjX | --- | SubjX | ---
+        // This prevents same-subject adjacency even when only one subject remains.
+        if (!bestSubject && prevSubjectKey) {
+          const rem = subjectGroups[prevSubjectKey]
+            ? subjectGroups[prevSubjectKey].length - subjectPointers[prevSubjectKey]
+            : 0;
+          if (rem > 0) {
+            prevSubjectKey = null; // allow it in the NEXT column
+            continue;             // skip this column
+          }
+          // rem === 0 means all done — nothing to place
+        }
+
+        if (bestSubject) {
+          const arr = subjectGroups[bestSubject];
+          for (let row = 0; row < rows; row++) {
+            if (subjectPointers[bestSubject] < arr.length) {
+              matrix[row][col] = [arr[subjectPointers[bestSubject]++]];
+              hallPlacedCount++;
+            }
+          }
+          prevSubjectKey = bestSubject;
         }
       }
-    }
+    } // end columns loop
+
+    // Enforce: no two adjacent seats in the same row may share a subject
+    fixSameSubjectAdjacency(matrix);
 
     allocation[hall.HallName] = matrix;
 
     report.push({
       hall: hall.HallName,
       placed: hallPlacedCount,
-      capacity: rows * columns, // Total physical slots, though pattern might limit actual usable
-      type: type
+      capacity: rows * columns,
+      type: "Column-wise (Year alternating → Subject fallback)",
     });
-  });
+  }); // end halls loop
 
-  const unplacedA = A.length - aIndex;
-  const unplacedB = B.length - bIndex;
+  // Count students that were never assigned a seat
+  const unplacedYear = Math.max(0, dominantArr.length - dominantIdx)
+    + Math.max(0, otherArr.length - otherIdx);
+
+  // If Phase 2 was active, also count any leftover in subject groups
+  const unplacedSubj = subjectGroups
+    ? Object.entries(subjectGroups).reduce(
+      (acc, [k, arr]) => acc + Math.max(0, arr.length - subjectPointers[k]),
+      0
+    )
+    : 0;
+
+  const totalUnplaced = unplacedYear + unplacedSubj;
+
+  // Split unplaced back to A / B for the report
+  const unplacedA = dominant === "A"
+    ? Math.max(0, dominantArr.length - dominantIdx)
+    : Math.max(0, otherArr.length - otherIdx);
+  const unplacedB = dominant === "B"
+    ? Math.max(0, dominantArr.length - dominantIdx)
+    : Math.max(0, otherArr.length - otherIdx);
+
+  console.log("\n===== UNPLACED STUDENTS =====\n");
+  console.log(`Year A: ${unplacedA}`);
+  console.log(`Year B: ${unplacedB}`);
+  console.log(`Phase-2 subject leftovers: ${unplacedSubj}`);
+  console.log(`Total Unplaced: ${totalUnplaced}`);
 
   return {
     allocation,
@@ -192,8 +271,8 @@ function allocateColumnWiseAB(students, hallsData) {
     unplaced: {
       A: unplacedA,
       B: unplacedB,
-      total: unplacedA + unplacedB
-    }
+      total: totalUnplaced,
+    },
   };
 }
 
@@ -377,37 +456,17 @@ router.post(
       ];
 
       /* -----------------------------
-         GROUP BY YEAR + SUBJECT
-      ------------------------------ */
-
-      const grouped =
-        groupByYearAndSubject(merged);
-
-      console.log("\n===== GROUPED OBJECT =====\n");
-      console.dir(grouped, { depth: null });
-
-      /* -----------------------------
-         BUILD ORDERED LIST
-      ------------------------------ */
-
-      const ordered =
-        buildOrderedList(grouped);
-
-      console.log("\n===== ORDERED LIST =====\n");
-
-      ordered.forEach((s, i) => {
-        console.log(
-          `${i + 1}. ${s.Roll || s.RollNumber} | ${s.subject} | ${s.year}`
-        );
-      });
-
-      /* -----------------------------
          ALLOCATE SEATS
+         (dominant-year alternating columns → subject fallback)
       ------------------------------ */
+
+      console.log("\n===== STUDENT COUNTS =====\n");
+      console.log(`Year A: ${(yearMap.A || []).length} students`);
+      console.log(`Year B: ${(yearMap.B || []).length} students`);
 
       const { allocation, report, unplaced } =
         allocateColumnWiseAB(
-          ordered,
+          merged,
           hallsData
         );
 
@@ -453,9 +512,7 @@ router.post(
 
           name,
           sems,
-
           isElective: true,
-
           examDate,
         });
 
